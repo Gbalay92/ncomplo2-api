@@ -1,4 +1,5 @@
 import pool from '../db/pool.js'
+import { deriveUserGroupOnly, deriveUserStandings } from '../services/tournament.service.js'
 
 export async function getMyPredictions(req, res) {
   const { rows } = await pool.query(`
@@ -28,6 +29,10 @@ export async function upsertPrediction(req, res) {
   if (!match.length) return res.status(404).json({ error: 'Match not found' })
   if (match[0].is_locked) return res.status(409).json({ error: 'Match is locked for predictions' })
 
+  const { rows: matchInfo } = await pool.query(
+    'SELECT group_name FROM group_matches WHERE id = $1', [match_id]
+  )
+
   const { rows } = await pool.query(`
     INSERT INTO predictions (user_id, match_id, pred_home_goals, pred_away_goals)
     VALUES ($1, $2, $3, $4)
@@ -35,6 +40,9 @@ export async function upsertPrediction(req, res) {
     DO UPDATE SET pred_home_goals = $3, pred_away_goals = $4, updated_at = now()
     RETURNING *
   `, [req.user.sub, match_id, pred_home_goals, pred_away_goals])
+
+  // Recalculate predicted standings for just this group
+  await deriveUserGroupOnly(req.user.sub, matchInfo[0].group_name)
 
   res.json(rows[0])
 }
@@ -67,6 +75,10 @@ export async function upsertManyPredictions(req, res) {
     }
 
     await client.query('COMMIT')
+
+    // Recalculate predicted standings after saving bulk predictions
+    await deriveUserStandings(req.user.sub)
+
     res.json(results)
   } catch (err) {
     await client.query('ROLLBACK')
