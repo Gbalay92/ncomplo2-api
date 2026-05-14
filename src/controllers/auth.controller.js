@@ -28,10 +28,14 @@ async function saveRefreshToken(userId, refreshToken) {
   )
 }
 
+function formatUser(user) {
+  return { id: user.id, display_name: user.display_name, first_name: user.first_name, last_name: user.last_name, is_admin: user.is_admin }
+}
+
 export async function register(req, res) {
-  const { email, display_name, password } = req.body
-  if (!email || !display_name || !password) {
-    return res.status(400).json({ error: 'email, display_name, and password are required' })
+  const { email, first_name, last_name, display_name, password } = req.body
+  if (!email || !first_name || !last_name || !display_name || !password) {
+    return res.status(400).json({ error: 'email, first_name, last_name, display_name, and password are required' })
   }
 
   const { rows: whitelist } = await pool.query(
@@ -44,8 +48,10 @@ export async function register(req, res) {
 
   const password_hash = await bcrypt.hash(password, 12)
   const { rows } = await pool.query(
-    'INSERT INTO users (email, display_name, password_hash) VALUES ($1, $2, $3) RETURNING id, display_name, is_admin',
-    [email, display_name, password_hash]
+    `INSERT INTO users (email, first_name, last_name, display_name, password_hash)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, first_name, last_name, display_name, is_admin`,
+    [email, first_name, last_name, display_name, password_hash]
   )
   const user = rows[0]
 
@@ -53,7 +59,7 @@ export async function register(req, res) {
   await saveRefreshToken(user.id, refreshToken)
   setTokenCookies(res, accessToken, refreshToken)
 
-  res.status(201).json({ user: { id: user.id, display_name: user.display_name } })
+  res.status(201).json({ user: formatUser(user) })
 }
 
 export async function login(req, res) {
@@ -61,7 +67,7 @@ export async function login(req, res) {
   if (!email || !password) return res.status(400).json({ error: 'email and password are required' })
 
   const { rows } = await pool.query(
-    'SELECT id, display_name, password_hash, is_admin FROM users WHERE email = $1', [email]
+    'SELECT id, first_name, last_name, display_name, password_hash, is_admin FROM users WHERE email = $1', [email]
   )
   if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' })
 
@@ -73,7 +79,7 @@ export async function login(req, res) {
   await saveRefreshToken(user.id, refreshToken)
   setTokenCookies(res, accessToken, refreshToken)
 
-  res.json({ user: { id: user.id, display_name: user.display_name } })
+  res.json({ user: formatUser(user) })
 }
 
 export async function logout(req, res) {
@@ -93,7 +99,7 @@ export async function refresh(req, res) {
 
   const hash = crypto.createHash('sha256').update(token).digest('hex')
   const { rows } = await pool.query(
-    `SELECT rt.user_id AS id, u.display_name, u.is_admin
+    `SELECT rt.user_id AS id, u.first_name, u.last_name, u.display_name, u.is_admin
      FROM refresh_tokens rt
      JOIN users u ON u.id = rt.user_id
      WHERE rt.token_hash = $1 AND rt.expires_at > now()`,
@@ -103,11 +109,19 @@ export async function refresh(req, res) {
 
   const user = rows[0]
 
-  // Rotate: delete old token, issue new pair
   await pool.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hash])
   const { accessToken, refreshToken: newRefresh } = issueTokens(user)
   await saveRefreshToken(user.id, newRefresh)
   setTokenCookies(res, accessToken, newRefresh)
 
-  res.json({ ok: true })
+  res.json({ user: formatUser(user) })
+}
+
+export async function me(req, res) {
+  const { rows } = await pool.query(
+    'SELECT id, first_name, last_name, display_name, is_admin FROM users WHERE id = $1',
+    [req.user.sub]
+  )
+  if (!rows.length) return res.status(404).json({ error: 'User not found' })
+  res.json({ user: formatUser(rows[0]) })
 }

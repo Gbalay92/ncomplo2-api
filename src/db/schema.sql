@@ -55,6 +55,8 @@ CREATE TABLE email_whitelist (
 CREATE TABLE users (
     id            UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     email         TEXT        NOT NULL UNIQUE,
+    first_name    TEXT        NOT NULL,
+    last_name     TEXT        NOT NULL,
     display_name  TEXT        NOT NULL,
     password_hash TEXT        NOT NULL,
     is_admin      BOOLEAN     NOT NULL DEFAULT false,
