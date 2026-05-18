@@ -1,51 +1,47 @@
 import pool from '../db/pool.js'
 import { getUserQualifiers } from '../services/tournament.service.js'
 
-// Returns the user's 32 predicted qualifiers (must have submitted group predictions first)
 export async function getMyQualifiers(req, res) {
   const qualifiers = await getUserQualifiers(req.user.sub)
   res.json(qualifiers)
 }
 
-// Returns the user's full predicted bracket
+// Returns ALL knockout slots with the user's picks (null pred_winner_id if not picked)
 export async function getMyBracket(req, res) {
   const { rows } = await pool.query(`
-    SELECT pb.slot_id, pb.pred_winner_id,
-           ks.slot_label, ks.stage, ks.match_number,
+    SELECT ks.id AS slot_id, ks.slot_label, ks.stage, ks.match_number,
            ks.home_source, ks.away_source,
+           pb.pred_winner_id,
            t.name AS pred_winner_name, t.code AS pred_winner_code, t.flag_url AS pred_winner_flag
-    FROM predicted_bracket pb
-    JOIN knockout_slots ks ON ks.id = pb.slot_id
+    FROM knockout_slots ks
+    LEFT JOIN predicted_bracket pb ON pb.slot_id = ks.id AND pb.user_id = $1
     LEFT JOIN teams t ON t.id = pb.pred_winner_id
-    WHERE pb.user_id = $1
     ORDER BY ks.stage, ks.match_number
   `, [req.user.sub])
   res.json(rows)
 }
 
-// Saves/updates the user's full predicted bracket (array of slot picks)
+// Full replacement: deletes all user picks then inserts the new ones in a transaction
 export async function saveMyBracket(req, res) {
   const { picks } = req.body
-  if (!Array.isArray(picks) || !picks.length) {
-    return res.status(400).json({ error: 'picks must be a non-empty array of { slot_id, pred_winner_id }' })
+  if (!Array.isArray(picks)) {
+    return res.status(400).json({ error: 'picks must be an array of { slot_id, pred_winner_id }' })
   }
 
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
-    const results = []
 
+    await client.query('DELETE FROM predicted_bracket WHERE user_id = $1', [req.user.sub])
+
+    const results = []
     for (const { slot_id, pred_winner_id } of picks) {
       if (!slot_id || !pred_winner_id) continue
-
       const { rows } = await client.query(`
         INSERT INTO predicted_bracket (user_id, slot_id, pred_winner_id)
         VALUES ($1, $2, $3)
-        ON CONFLICT (user_id, slot_id)
-        DO UPDATE SET pred_winner_id = $3, updated_at = now()
         RETURNING slot_id, pred_winner_id
       `, [req.user.sub, slot_id, pred_winner_id])
-
       results.push(rows[0])
     }
 
