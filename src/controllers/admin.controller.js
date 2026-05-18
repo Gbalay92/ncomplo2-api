@@ -105,6 +105,8 @@ export async function lockGroupStage(req, res) {
     client.release()
   }
 
+  await pool.query(`UPDATE tournament_settings SET group_stage_locked = true WHERE id = true`)
+
   res.json({ message: 'Group stage locked. Round of 32 matchups seeded.', qualifiers })
 }
 
