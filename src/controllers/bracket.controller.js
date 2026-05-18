@@ -28,6 +28,11 @@ export async function saveMyBracket(req, res) {
     return res.status(400).json({ error: 'picks must be an array of { slot_id, pred_winner_id }' })
   }
 
+  const { rows: settings } = await pool.query('SELECT predictions_locked FROM tournament_settings WHERE id = true')
+  if (settings[0]?.predictions_locked) {
+    return res.status(409).json({ error: 'Predictions are locked' })
+  }
+
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
