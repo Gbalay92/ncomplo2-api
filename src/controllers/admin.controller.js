@@ -60,6 +60,11 @@ export async function setKnockoutResult(req, res) {
   res.json(rows[0])
 }
 
+export async function lockPredictions(req, res) {
+  await pool.query(`UPDATE tournament_settings SET predictions_locked = true WHERE id = true`)
+  res.json({ message: 'Predictions locked.' })
+}
+
 // Locks the group stage: derives real standings, seeds round-of-32 matchups
 export async function lockGroupStage(req, res) {
   // Verify all 96 group matches have results
