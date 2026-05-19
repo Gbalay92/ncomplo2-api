@@ -60,6 +60,35 @@ export async function setKnockoutResult(req, res) {
   res.json(rows[0])
 }
 
+export async function getAdminBracket(req, res) {
+  const { rows } = await pool.query(`
+    SELECT
+      ks.id           AS slot_id,
+      ks.slot_label,
+      ks.stage,
+      ks.match_number,
+      ks.match_date,
+      rb.id           AS real_bracket_id,
+      ht.id           AS home_team_id,
+      ht.name         AS home_team_name,
+      ht.flag_url     AS home_team_flag,
+      at.id           AS away_team_id,
+      at.name         AS away_team_name,
+      at.flag_url     AS away_team_flag,
+      rb.real_home_goals,
+      rb.real_away_goals,
+      rb.real_winner_id,
+      wt.name         AS real_winner_name
+    FROM knockout_slots ks
+    LEFT JOIN real_bracket rb ON rb.slot_id = ks.id
+    LEFT JOIN teams ht ON ht.id = rb.home_team_id
+    LEFT JOIN teams at ON at.id = rb.away_team_id
+    LEFT JOIN teams wt ON wt.id = rb.real_winner_id
+    ORDER BY ks.stage, ks.match_number
+  `)
+  res.json(rows)
+}
+
 export async function lockPredictions(req, res) {
   await pool.query(`UPDATE tournament_settings SET predictions_locked = true WHERE id = true`)
   res.json({ message: 'Predictions locked.' })
