@@ -6,9 +6,9 @@ function getOutcome(home, away) {
   return 'draw'
 }
 
-function scoreGroupPrediction(predHome, predAway, realHome, realAway) {
-  if (predHome === realHome && predAway === realAway) return 3
-  if (getOutcome(predHome, predAway) === getOutcome(realHome, realAway)) return 1
+function scoreGroupPrediction(predHome, predAway, realHome, realAway, pointsSign, pointsExact) {
+  if (predHome === realHome && predAway === realAway) return pointsSign + pointsExact
+  if (getOutcome(predHome, predAway) === getOutcome(realHome, realAway)) return pointsSign
   return 0
 }
 
@@ -28,12 +28,16 @@ export async function scoreGroupMatch(matchId) {
     }
     const { real_home_goals, real_away_goals } = matches[0]
 
+    const { rows: rules } = await client.query(
+      "SELECT points_sign, points_exact FROM scoring_rules WHERE stage = 'group'"
+    )
+    const { points_sign, points_exact } = rules[0]
+
     const { rows: predictions } = await client.query(
       'SELECT user_id, pred_home_goals, pred_away_goals FROM predictions WHERE match_id = $1',
       [matchId]
     )
 
-    // Delete previous log entries for this match (idempotent recalculation)
     await client.query(
       "DELETE FROM score_log WHERE event_type = 'group_match' AND event_ref = $1",
       [matchId]
@@ -42,7 +46,8 @@ export async function scoreGroupMatch(matchId) {
     for (const pred of predictions) {
       const pts = scoreGroupPrediction(
         pred.pred_home_goals, pred.pred_away_goals,
-        real_home_goals, real_away_goals
+        real_home_goals, real_away_goals,
+        points_sign, points_exact
       )
       if (pts > 0) {
         await client.query(`
@@ -62,32 +67,45 @@ export async function scoreGroupMatch(matchId) {
 }
 
 // Called after all matches in a knockout stage are resolved.
-// Scores how many teams each user correctly predicted for that stage.
+// R32–SF: scores correct predicted winners (points_classify each).
+// Final: scores users whose final pick is either finalist (points_classify),
+//        then scoreChampion() adds points_champion for the actual winner.
 export async function scoreKnockoutRound(stage) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
 
-    // Get points_classify for this stage
     const { rows: rules } = await client.query(
-      'SELECT points_classify, points_champion FROM scoring_rules WHERE stage = $1',
+      'SELECT points_classify FROM scoring_rules WHERE stage = $1',
       [stage]
     )
     if (!rules.length) throw new Error(`No scoring rule for stage: ${stage}`)
-    const { points_classify, points_champion } = rules[0]
+    const { points_classify } = rules[0]
 
-    // Real winners for this stage (teams that won their match = appear as winner in their slot)
-    const { rows: realWinners } = await client.query(`
-      SELECT rb.real_winner_id AS team_id
-      FROM real_bracket rb
-      JOIN knockout_slots ks ON ks.id = rb.slot_id
-      WHERE ks.stage = $1 AND rb.real_winner_id IS NOT NULL
-    `, [stage])
+    let realTeamIds
 
-    if (!realWinners.length) throw new Error(`No real results for stage: ${stage}`)
-    const realTeamIds = new Set(realWinners.map(r => r.team_id))
+    if (stage === 'final') {
+      // Award points_classify to users whose final pick reaches the final (either finalist)
+      const { rows: finalists } = await client.query(`
+        SELECT rb.home_team_id AS team_id FROM real_bracket rb
+        JOIN knockout_slots ks ON ks.id = rb.slot_id WHERE ks.stage = 'final'
+        UNION
+        SELECT rb.away_team_id FROM real_bracket rb
+        JOIN knockout_slots ks ON ks.id = rb.slot_id WHERE ks.stage = 'final'
+      `)
+      if (!finalists.length) throw new Error('Final teams not yet set')
+      realTeamIds = new Set(finalists.map(r => r.team_id).filter(Boolean))
+    } else {
+      const { rows: realWinners } = await client.query(`
+        SELECT rb.real_winner_id AS team_id
+        FROM real_bracket rb
+        JOIN knockout_slots ks ON ks.id = rb.slot_id
+        WHERE ks.stage = $1 AND rb.real_winner_id IS NOT NULL
+      `, [stage])
+      if (!realWinners.length) throw new Error(`No real results for stage: ${stage}`)
+      realTeamIds = new Set(realWinners.map(r => r.team_id))
+    }
 
-    // All users and their predicted winners for this stage
     const { rows: userPredictions } = await client.query(`
       SELECT pb.user_id, pb.pred_winner_id AS team_id
       FROM predicted_bracket pb
@@ -95,13 +113,11 @@ export async function scoreKnockoutRound(stage) {
       WHERE ks.stage = $1 AND pb.pred_winner_id IS NOT NULL
     `, [stage])
 
-    // Delete previous log entries for this stage
     await client.query(
       "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1",
       [stage]
     )
 
-    // Group predictions by user
     const byUser = {}
     for (const { user_id, team_id } of userPredictions) {
       if (!byUser[user_id]) byUser[user_id] = []
@@ -127,7 +143,7 @@ export async function scoreKnockoutRound(stage) {
   }
 }
 
-// Called after the final result is confirmed.
+// Called after the final result is confirmed. Awards points_champion for the correct champion pick.
 export async function scoreChampion() {
   const client = await pool.connect()
   try {
@@ -142,7 +158,11 @@ export async function scoreChampion() {
     if (!finalSlot.length) throw new Error('Final result not yet confirmed')
     const championId = finalSlot[0].real_winner_id
 
-    // Users who predicted this team as the final winner
+    const { rows: rules } = await client.query(
+      "SELECT points_champion FROM scoring_rules WHERE stage = 'final'"
+    )
+    const { points_champion } = rules[0]
+
     const { rows: correct } = await client.query(`
       SELECT pb.user_id
       FROM predicted_bracket pb
@@ -157,8 +177,8 @@ export async function scoreChampion() {
     for (const { user_id } of correct) {
       await client.query(`
         INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
-        VALUES ($1, 'champion', 'final', 'final', 50)
-      `, [user_id])
+        VALUES ($1, 'champion', 'final', 'final', $2)
+      `, [user_id, points_champion])
     }
 
     await client.query('COMMIT')
