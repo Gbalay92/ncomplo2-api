@@ -14,7 +14,8 @@ function issueTokens(user) {
 }
 
 function setTokenCookies(res, accessToken, refreshToken) {
-  const base = { httpOnly: true, sameSite: 'strict', secure: process.env.NODE_ENV === 'production' }
+  const prod = process.env.NODE_ENV === 'production'
+  const base = { httpOnly: true, sameSite: prod ? 'none' : 'strict', secure: prod }
   res.cookie('access_token', accessToken, { ...base, maxAge: 15 * 60 * 1000 })
   res.cookie('refresh_token', refreshToken, { ...base, maxAge: REFRESH_TTL_MS, path: '/auth/refresh' })
 }
