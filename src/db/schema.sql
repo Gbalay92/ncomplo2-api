@@ -211,12 +211,12 @@ CREATE TABLE scoring_rules (
 );
 
 INSERT INTO scoring_rules (stage, points_sign, points_exact, points_classify, points_champion) VALUES
-    ('group',           1,  3,  0,  0),
-    ('round_of_32',     0,  0,  3,  0),
-    ('round_of_16',     0,  0,  5,  0),
-    ('quarter_final',   0,  0, 10,  0),
-    ('semi_final',      0,  0, 17,  0),
-    ('final',           0,  0, 25, 50);
+    ('group',           2,  3,  0,  0),
+    ('round_of_32',     0,  0,  5,  0),
+    ('round_of_16',     0,  0, 10,  0),
+    ('quarter_final',   0,  0, 15,  0),
+    ('semi_final',      0,  0, 25,  0),
+    ('final',           0,  0, 35, 50);
 
 -- ============================================================
 --  12. SCORE LOG
