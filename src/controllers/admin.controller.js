@@ -1,5 +1,5 @@
 import pool from '../db/pool.js'
-import { scoreGroupMatch, scoreKnockoutRound, scoreChampion, isStageComplete } from '../services/scoring.service.js'
+import { scoreGroupMatch, scoreKnockoutSlot, scoreChampion } from '../services/scoring.service.js'
 import { getRealQualifiersMap } from '../services/tournament.service.js'
 
 export async function setGroupMatchResult(req, res) {
@@ -49,12 +49,9 @@ export async function setKnockoutResult(req, res) {
 
   const { stage } = rows[0]
 
-  // If all matches in this stage are done, score the round
-  if (await isStageComplete(stage)) {
-    await scoreKnockoutRound(stage)
-    if (stage === 'final') {
-      await scoreChampion()
-    }
+  await scoreKnockoutSlot(slot_id)
+  if (stage === 'final' && winner_id) {
+    await scoreChampion()
   }
 
   res.json(rows[0])

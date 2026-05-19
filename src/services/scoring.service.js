@@ -66,14 +66,33 @@ export async function scoreGroupMatch(matchId) {
   }
 }
 
-// Called after all matches in a knockout stage are resolved.
-// R32–SF: scores correct predicted winners (points_classify each).
-// Final: scores users whose final pick is either finalist (points_classify),
-//        then scoreChampion() adds points_champion for the actual winner.
-export async function scoreKnockoutRound(stage) {
+// Called after each knockout result is saved.
+// Scores the single slot immediately — safe to call multiple times as results
+// are updated live. Uses slot_id as event_ref so each slot is independent.
+export async function scoreKnockoutSlot(slotId) {
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
+
+    const { rows: slotRows } = await client.query(`
+      SELECT ks.stage, rb.real_winner_id, rb.home_team_id, rb.away_team_id
+      FROM knockout_slots ks
+      JOIN real_bracket rb ON rb.slot_id = ks.id
+      WHERE ks.id = $1
+    `, [slotId])
+    if (!slotRows.length) throw new Error('Slot not found')
+    const { stage, real_winner_id, home_team_id, away_team_id } = slotRows[0]
+
+    await client.query(
+      "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1",
+      [slotId]
+    )
+
+    // No winner yet (e.g. draw mid-match, penalties not decided) — nothing to score
+    if (!real_winner_id) {
+      await client.query('COMMIT')
+      return
+    }
 
     const { rows: rules } = await client.query(
       'SELECT points_classify FROM scoring_rules WHERE stage = $1',
@@ -82,55 +101,25 @@ export async function scoreKnockoutRound(stage) {
     if (!rules.length) throw new Error(`No scoring rule for stage: ${stage}`)
     const { points_classify } = rules[0]
 
-    let realTeamIds
-
-    if (stage === 'final') {
-      // Award points_classify to users whose final pick reaches the final (either finalist)
-      const { rows: finalists } = await client.query(`
-        SELECT rb.home_team_id AS team_id FROM real_bracket rb
-        JOIN knockout_slots ks ON ks.id = rb.slot_id WHERE ks.stage = 'final'
-        UNION
-        SELECT rb.away_team_id FROM real_bracket rb
-        JOIN knockout_slots ks ON ks.id = rb.slot_id WHERE ks.stage = 'final'
-      `)
-      if (!finalists.length) throw new Error('Final teams not yet set')
-      realTeamIds = new Set(finalists.map(r => r.team_id).filter(Boolean))
-    } else {
-      const { rows: realWinners } = await client.query(`
-        SELECT rb.real_winner_id AS team_id
-        FROM real_bracket rb
-        JOIN knockout_slots ks ON ks.id = rb.slot_id
-        WHERE ks.stage = $1 AND rb.real_winner_id IS NOT NULL
-      `, [stage])
-      if (!realWinners.length) throw new Error(`No real results for stage: ${stage}`)
-      realTeamIds = new Set(realWinners.map(r => r.team_id))
-    }
-
-    const { rows: userPredictions } = await client.query(`
-      SELECT pb.user_id, pb.pred_winner_id AS team_id
-      FROM predicted_bracket pb
-      JOIN knockout_slots ks ON ks.id = pb.slot_id
-      WHERE ks.stage = $1 AND pb.pred_winner_id IS NOT NULL
-    `, [stage])
-
-    await client.query(
-      "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1",
-      [stage]
+    // Final: both finalists earn points_classify; other rounds: only the winner
+    const scoringTeams = new Set(
+      stage === 'final'
+        ? [home_team_id, away_team_id].filter(Boolean)
+        : [real_winner_id]
     )
 
-    const byUser = {}
-    for (const { user_id, team_id } of userPredictions) {
-      if (!byUser[user_id]) byUser[user_id] = []
-      byUser[user_id].push(team_id)
-    }
+    const { rows: predictions } = await client.query(`
+      SELECT user_id, pred_winner_id
+      FROM predicted_bracket
+      WHERE slot_id = $1 AND pred_winner_id IS NOT NULL
+    `, [slotId])
 
-    for (const [userId, predictedTeams] of Object.entries(byUser)) {
-      const correct = predictedTeams.filter(id => realTeamIds.has(id)).length
-      if (correct > 0) {
+    for (const { user_id, pred_winner_id } of predictions) {
+      if (scoringTeams.has(pred_winner_id)) {
         await client.query(`
           INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
           VALUES ($1, 'classification', $2, $3, $4)
-        `, [userId, stage, stage, correct * points_classify])
+        `, [user_id, slotId, stage, points_classify])
       }
     }
 
@@ -190,15 +179,3 @@ export async function scoreChampion() {
   }
 }
 
-// Returns true when every match in a given knockout stage has a confirmed winner
-export async function isStageComplete(stage) {
-  const { rows } = await pool.query(`
-    SELECT COUNT(*) AS total,
-           COUNT(rb.real_winner_id) AS confirmed
-    FROM knockout_slots ks
-    LEFT JOIN real_bracket rb ON rb.slot_id = ks.id
-    WHERE ks.stage = $1
-  `, [stage])
-  const { total, confirmed } = rows[0]
-  return parseInt(total) > 0 && total === confirmed
-}
