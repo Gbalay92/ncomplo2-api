@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { requireAdmin } from '../middleware/auth.js'
 import {
   setGroupMatchResult,
+  getAdminBracket,
   setKnockoutResult,
   lockPredictions,
   lockGroupStage,
@@ -15,6 +16,7 @@ const router = Router()
 router.use(requireAdmin)
 
 router.post('/matches/group/:id/result', setGroupMatchResult)
+router.get('/bracket', getAdminBracket)
 router.post('/bracket/:slot_id/result', setKnockoutResult)
 router.post('/lock-predictions', lockPredictions)
 router.post('/lock-group-stage', lockGroupStage)
