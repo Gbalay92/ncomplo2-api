@@ -6,9 +6,9 @@ function getOutcome(home, away) {
   return 'draw'
 }
 
-function scoreGroupPrediction(predHome, predAway, realHome, realAway) {
-  if (predHome === realHome && predAway === realAway) return 3
-  if (getOutcome(predHome, predAway) === getOutcome(realHome, realAway)) return 1
+function scoreGroupPrediction(predHome, predAway, realHome, realAway, pointsSign, pointsExact) {
+  if (predHome === realHome && predAway === realAway) return pointsSign + pointsExact
+  if (getOutcome(predHome, predAway) === getOutcome(realHome, realAway)) return pointsSign
   return 0
 }
 
@@ -28,12 +28,16 @@ export async function scoreGroupMatch(matchId) {
     }
     const { real_home_goals, real_away_goals } = matches[0]
 
+    const { rows: rules } = await client.query(
+      "SELECT points_sign, points_exact FROM scoring_rules WHERE stage = 'group'"
+    )
+    const { points_sign, points_exact } = rules[0]
+
     const { rows: predictions } = await client.query(
       'SELECT user_id, pred_home_goals, pred_away_goals FROM predictions WHERE match_id = $1',
       [matchId]
     )
 
-    // Delete previous log entries for this match (idempotent recalculation)
     await client.query(
       "DELETE FROM score_log WHERE event_type = 'group_match' AND event_ref = $1",
       [matchId]
@@ -42,7 +46,8 @@ export async function scoreGroupMatch(matchId) {
     for (const pred of predictions) {
       const pts = scoreGroupPrediction(
         pred.pred_home_goals, pred.pred_away_goals,
-        real_home_goals, real_away_goals
+        real_home_goals, real_away_goals,
+        points_sign, points_exact
       )
       if (pts > 0) {
         await client.query(`
@@ -127,7 +132,7 @@ export async function scoreKnockoutSlot(slotId) {
   }
 }
 
-// Called after the final result is confirmed.
+// Called after the final result is confirmed. Awards points_champion for the correct champion pick.
 export async function scoreChampion() {
   const client = await pool.connect()
   try {
@@ -142,7 +147,11 @@ export async function scoreChampion() {
     if (!finalSlot.length) throw new Error('Final result not yet confirmed')
     const championId = finalSlot[0].real_winner_id
 
-    // Users who predicted this team as the final winner
+    const { rows: rules } = await client.query(
+      "SELECT points_champion FROM scoring_rules WHERE stage = 'final'"
+    )
+    const { points_champion } = rules[0]
+
     const { rows: correct } = await client.query(`
       SELECT pb.user_id
       FROM predicted_bracket pb
@@ -157,8 +166,8 @@ export async function scoreChampion() {
     for (const { user_id } of correct) {
       await client.query(`
         INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
-        VALUES ($1, 'champion', 'final', 'final', 50)
-      `, [user_id])
+        VALUES ($1, 'champion', 'final', 'final', $2)
+      `, [user_id, points_champion])
     }
 
     await client.query('COMMIT')
