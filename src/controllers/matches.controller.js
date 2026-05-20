@@ -43,6 +43,37 @@ export async function getMatches(req, res) {
   res.json(rows)
 }
 
+export async function getTodayMatches(req, res) {
+  const matchFields = `
+    m.id, m.match_number, m.group_name, m.match_date,
+    m.real_home_goals, m.real_away_goals,
+    ht.name AS home_team, ht.flag_url AS home_flag,
+    at.name AS away_team, at.flag_url AS away_flag
+  `
+  const matchJoins = `
+    FROM group_matches m
+    JOIN teams ht ON ht.id = m.home_team_id
+    JOIN teams at ON at.id = m.away_team_id
+  `
+
+  const { rows: today } = await pool.query(`
+    SELECT ${matchFields} ${matchJoins}
+    WHERE DATE(m.match_date AT TIME ZONE 'UTC') = CURRENT_DATE
+    ORDER BY m.match_date
+  `)
+
+  if (today.length) return res.json({ matches: today, isToday: true })
+
+  const { rows: next } = await pool.query(`
+    SELECT ${matchFields} ${matchJoins}
+    WHERE m.match_date > now() AND m.real_home_goals IS NULL
+    ORDER BY m.match_date
+    LIMIT 1
+  `)
+
+  res.json({ matches: next, isToday: false })
+}
+
 export async function getNextMatch(req, res) {
   const { rows } = await pool.query(`
     SELECT
