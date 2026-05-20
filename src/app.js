@@ -8,6 +8,7 @@ import predictionsRoutes from './routes/predictions.js'
 import bracketRoutes from './routes/bracket.js'
 import adminRoutes from './routes/admin.js'
 import tournamentRoutes from './routes/tournament.js'
+import usersRoutes from './routes/users.js'
 
 const app = express()
 
@@ -22,6 +23,7 @@ app.use('/predictions', predictionsRoutes)
 app.use('/bracket', bracketRoutes)
 app.use('/admin', adminRoutes)
 app.use('/tournament', tournamentRoutes)
+app.use('/users', usersRoutes)
 
 // Global error handler
 app.use((err, req, res, _next) => {
