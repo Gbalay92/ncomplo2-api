@@ -5,12 +5,12 @@ import { getUserTodayPredictions, getUserPredictions, getUserBracket } from '../
 const router = Router()
 router.use(requireAuth)
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function validateUserId(req, res, next) {
-  const id = parseInt(req.params.userId, 10)
-  if (!Number.isInteger(id) || id < 1) {
+  if (!UUID_RE.test(req.params.userId)) {
     return res.status(400).json({ error: 'Invalid user ID' })
   }
-  req.params.userId = id
   next()
 }
 
