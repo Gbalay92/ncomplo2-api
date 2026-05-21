@@ -1,6 +1,10 @@
 import pool from '../db/pool.js'
 import { deriveUserGroupOnly, deriveUserStandings } from '../services/tournament.service.js'
 
+function isValidGoals(val) {
+  return Number.isInteger(val) && val >= 0 && val <= 30
+}
+
 export async function getMyPredictions(req, res) {
   const { rows } = await pool.query(`
     SELECT
@@ -22,6 +26,12 @@ export async function upsertPrediction(req, res) {
   if (match_id == null || pred_home_goals == null || pred_away_goals == null) {
     return res.status(400).json({ error: 'match_id, pred_home_goals, and pred_away_goals are required' })
   }
+  if (!Number.isInteger(match_id) || match_id < 1) {
+    return res.status(400).json({ error: 'match_id must be a positive integer' })
+  }
+  if (!isValidGoals(pred_home_goals) || !isValidGoals(pred_away_goals)) {
+    return res.status(400).json({ error: 'Goals must be integers between 0 and 30' })
+  }
 
   const { rows: match } = await pool.query(
     'SELECT is_locked FROM group_matches WHERE id = $1', [match_id]
@@ -41,7 +51,6 @@ export async function upsertPrediction(req, res) {
     RETURNING *
   `, [req.user.sub, match_id, pred_home_goals, pred_away_goals])
 
-  // Recalculate predicted standings for just this group
   await deriveUserGroupOnly(req.user.sub, matchInfo[0].group_name)
 
   res.json(rows[0])
@@ -51,6 +60,14 @@ export async function upsertManyPredictions(req, res) {
   const { predictions } = req.body
   if (!Array.isArray(predictions) || !predictions.length) {
     return res.status(400).json({ error: 'predictions must be a non-empty array' })
+  }
+
+  const invalid = predictions.find(({ match_id, pred_home_goals, pred_away_goals }) =>
+    !Number.isInteger(match_id) || match_id < 1 ||
+    !isValidGoals(pred_home_goals) || !isValidGoals(pred_away_goals)
+  )
+  if (invalid) {
+    return res.status(400).json({ error: 'Each prediction must have a valid match_id and goals between 0 and 30' })
   }
 
   const { rows: settings } = await pool.query('SELECT predictions_locked FROM tournament_settings WHERE id = true')
@@ -81,7 +98,6 @@ export async function upsertManyPredictions(req, res) {
 
     await client.query('COMMIT')
 
-    // Recalculate predicted standings after saving bulk predictions
     await deriveUserStandings(req.user.sub)
 
     res.json(results)

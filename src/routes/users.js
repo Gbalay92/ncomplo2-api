@@ -5,8 +5,17 @@ import { getUserTodayPredictions, getUserPredictions, getUserBracket } from '../
 const router = Router()
 router.use(requireAuth)
 
-router.get('/:userId/predictions/today', getUserTodayPredictions)
-router.get('/:userId/predictions', getUserPredictions)
-router.get('/:userId/bracket', getUserBracket)
+function validateUserId(req, res, next) {
+  const id = parseInt(req.params.userId, 10)
+  if (!Number.isInteger(id) || id < 1) {
+    return res.status(400).json({ error: 'Invalid user ID' })
+  }
+  req.params.userId = id
+  next()
+}
+
+router.get('/:userId/predictions/today', validateUserId, getUserTodayPredictions)
+router.get('/:userId/predictions', validateUserId, getUserPredictions)
+router.get('/:userId/bracket', validateUserId, getUserBracket)
 
 export default router
