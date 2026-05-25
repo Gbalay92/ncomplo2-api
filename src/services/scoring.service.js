@@ -128,26 +128,38 @@ export async function scoreGroupQualification(db = pool) {
 }
 
 // ─── scoreKnockoutAdvancement ─────────────────────────────────────────────────
-// Called from setKnockoutResult when a team wins a knockout match and advances
-// to the next stage.
+// Called from setKnockoutResult whenever a knockout result is saved (live or final).
 //
-// teamId   — the team that just advanced
-// targetStage — the stage they advanced INTO (e.g. 'round_of_16' when winning R32)
+// teamId     — current winner (null if live score has no winner yet, e.g. 1-1 mid-match)
+// targetStage — stage the winner advances INTO
+// prevTeamId  — previous winner stored in DB before this update (null if first save)
+//               used to clean up stale scoring when the winner changes
 //
-// Awards targetStage's points_classify to every user who had teamId as their
-// predicted winner of ANY match in the PREVIOUS stage (PREV_STAGE[targetStage]).
-// Max per team: one entry per user who predicted them.
-// Total max per round: N_teams_in_stage × points_classify
-//   R16:  16 × 10 = 160 pts   QF:    8 × 15 = 120 pts
-//   SF:    4 × 25 = 100 pts   Final: 2 × 35 =  70 pts
+// Max per round: N_teams × points_classify
+//   R16:  16 × 10 = 160 pts   QF:   8 × 15 = 120 pts
+//   SF:    4 × 25 = 100 pts   Final: 2 × 35 = 70 pts
 
-export async function scoreKnockoutAdvancement(teamId, targetStage, db = pool) {
+export async function scoreKnockoutAdvancement(teamId, targetStage, prevTeamId = null, db = pool) {
   const client = await db.connect()
   try {
     await client.query('BEGIN')
 
     const sourceStage = PREV_STAGE[targetStage]
     if (!sourceStage) throw new Error(`No previous stage for: ${targetStage}`)
+
+    // Clean up stale entries when the winner changes (e.g. 1-0 → 1-1 → 1-2)
+    if (prevTeamId && prevTeamId !== teamId) {
+      await client.query(
+        "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1 AND stage = $2",
+        [prevTeamId, targetStage]
+      )
+    }
+
+    // No winner yet (live intermediate score) — stale entries already cleaned up, nothing to insert
+    if (!teamId) {
+      await client.query('COMMIT')
+      return
+    }
 
     const { rows: rules } = await client.query(
       'SELECT points_classify FROM scoring_rules WHERE stage = $1',

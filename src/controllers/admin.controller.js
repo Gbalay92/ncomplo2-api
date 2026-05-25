@@ -69,21 +69,26 @@ export function makeAdminController(
         return res.status(400).json({ error: 'home_goals and away_goals must be non-negative integers' })
       }
 
-      if (home_goals === away_goals && !winner_id) {
-        return res.status(400).json({ error: 'winner_id is required when the match ends in a draw (penalties)' })
-      }
+      // No draw validation: 1-1 without winner_id is allowed for live in-progress scores.
+      // Scoring only triggers once winner_id is provided (final result or penalty winner).
 
       const useLock = current_updated_at != null
       const { rows } = await db.query(
         useLock
-          ? `UPDATE real_bracket
+          ? `WITH prev AS (SELECT real_winner_id FROM real_bracket WHERE slot_id = $4)
+             UPDATE real_bracket
              SET real_home_goals = $1, real_away_goals = $2, real_winner_id = $3, updated_at = now()
              WHERE slot_id = $4 AND updated_at = $5
-             RETURNING *, (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`
-          : `UPDATE real_bracket
+             RETURNING *,
+               (SELECT real_winner_id FROM prev) AS prev_winner_id,
+               (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`
+          : `WITH prev AS (SELECT real_winner_id FROM real_bracket WHERE slot_id = $4)
+             UPDATE real_bracket
              SET real_home_goals = $1, real_away_goals = $2, real_winner_id = $3, updated_at = now()
              WHERE slot_id = $4
-             RETURNING *, (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`,
+             RETURNING *,
+               (SELECT real_winner_id FROM prev) AS prev_winner_id,
+               (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`,
         useLock
           ? [home_goals, away_goals, winner_id, slot_id, current_updated_at]
           : [home_goals, away_goals, winner_id, slot_id]
@@ -103,13 +108,15 @@ export function makeAdminController(
         return res.status(404).json({ error: 'Bracket slot not found' })
       }
 
-      const { stage } = rows[0]
-
-      // Score advancement: if the winner advances to another stage, award
-      // points to users who had this team in their predicted bracket for this round.
+      const { stage, prev_winner_id } = rows[0]
       const nextStage = NEXT_STAGE[stage]
-      if (nextStage && winner_id) {
-        await scoring.scoreKnockoutAdvancement(winner_id, nextStage)
+
+      // Score advancement — handles all live-update cases:
+      //   winner unchanged  → idempotent (delete + re-insert same team)
+      //   winner changed    → deletes prev team entries, inserts new team
+      //   winner now null   → deletes prev team entries, nothing inserted
+      if (nextStage && (winner_id || prev_winner_id)) {
+        await scoring.scoreKnockoutAdvancement(winner_id, nextStage, prev_winner_id)
       }
 
       // After the final: also score champion

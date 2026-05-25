@@ -162,10 +162,10 @@ describe('scoreKnockoutAdvancement', () => {
 
   test('un usuario predijo el equipo → recibe puntos (R16, 10 pts)', async () => {
     const db = fakeDb([
-      { rows: [{ points_classify: 10 }] },               // scoring rule for round_of_16
-      { rows: [{ user_id: 'u1' }] },                     // users who predicted team-a in R32
+      { rows: [{ points_classify: 10 }] },
+      { rows: [{ user_id: 'u1' }] },
     ])
-    await scoreKnockoutAdvancement('team-a', 'round_of_16', db)
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', null, db)
     assert.equal(db.inserts.length, 1)
     assert.equal(db.inserts[0][0], 'u1')
     assert.equal(db.inserts[0][1], 'team-a')
@@ -178,16 +178,16 @@ describe('scoreKnockoutAdvancement', () => {
       { rows: [{ points_classify: 10 }] },
       { rows: [] },
     ])
-    await scoreKnockoutAdvancement('team-a', 'round_of_16', db)
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', null, db)
     assert.equal(db.inserts.length, 0)
   })
 
   test('múltiples usuarios que predijeron el mismo equipo', async () => {
     const db = fakeDb([
-      { rows: [{ points_classify: 15 }] },               // quarter_final
+      { rows: [{ points_classify: 15 }] },
       { rows: [{ user_id: 'u1' }, { user_id: 'u2' }, { user_id: 'u3' }] },
     ])
-    await scoreKnockoutAdvancement('team-b', 'quarter_final', db)
+    await scoreKnockoutAdvancement('team-b', 'quarter_final', null, db)
     assert.equal(db.inserts.length, 3)
     assert.equal(db.inserts[0][3], 15)
     assert.equal(db.inserts[1][3], 15)
@@ -196,10 +196,10 @@ describe('scoreKnockoutAdvancement', () => {
 
   test('finalista (semi_final winner → final, 35 pts)', async () => {
     const db = fakeDb([
-      { rows: [{ points_classify: 35 }] },               // final
+      { rows: [{ points_classify: 35 }] },
       { rows: [{ user_id: 'u1' }] },
     ])
-    await scoreKnockoutAdvancement('team-a', 'final', db)
+    await scoreKnockoutAdvancement('team-a', 'final', null, db)
     assert.equal(db.inserts.length, 1)
     assert.equal(db.inserts[0][2], 'final')
     assert.equal(db.inserts[0][3], 35)
@@ -208,30 +208,51 @@ describe('scoreKnockoutAdvancement', () => {
   test('targetStage sin entrada previa en PREV_STAGE → lanza error', async () => {
     const db = fakeDb([])
     await assert.rejects(
-      () => scoreKnockoutAdvancement('team-a', 'round_of_32', db),
+      () => scoreKnockoutAdvancement('team-a', 'round_of_32', null, db),
       /No previous stage for: round_of_32/
     )
   })
 
-  test('idempotente — puede llamarse dos veces sin duplicar puntos', async () => {
-    // Segunda llamada borra las entradas anteriores (DELETE) antes de insertar
-    // fakeDb no ejecuta realmente el DELETE, pero sí los INSERTs: si la función
-    // se llama dos veces con la misma fakeDb hay 2 inserts (uno por llamada).
-    // Lo que testamos aquí es que la secuencia DELETE→INSERT exista en la función.
-    const db1 = fakeDb([
+  test('ganador cambia (1-0 → 1-2): borra entradas del equipo anterior', async () => {
+    const db = fakeDb([
       { rows: [{ points_classify: 10 }] },
-      { rows: [{ user_id: 'u1' }] },
+      { rows: [{ user_id: 'u2' }] },
     ])
-    await scoreKnockoutAdvancement('team-a', 'round_of_16', db1)
-    assert.equal(db1.inserts.length, 1)
+    await scoreKnockoutAdvancement('team-b', 'round_of_16', 'team-a', db)
+    // team-a fue el anterior ganador → DELETE de sus entradas
+    assert.equal(db.deletes.length, 2) // 1 por prevTeamId + 1 idempotente del nuevo
+    assert.equal(db.deletes[0][0], 'team-a')   // limpia el anterior
+    assert.equal(db.deletes[1][0], 'team-b')   // idempotente del nuevo
+    assert.equal(db.inserts.length, 1)
+    assert.equal(db.inserts[0][0], 'u2')
+  })
 
-    // Segunda llamada con nueva db: mismo resultado limpio
-    const db2 = fakeDb([
+  test('marcador en vivo sin ganador (1-1, prevTeamId set) → borra prev, no inserta', async () => {
+    // 1-0 team-a → actualiza a 1-1 sin winner: teamId=null, prevTeamId='team-a'
+    const db = fakeDb([])
+    await scoreKnockoutAdvancement(null, 'round_of_16', 'team-a', db)
+    assert.equal(db.deletes.length, 1)
+    assert.equal(db.deletes[0][0], 'team-a')
+    assert.equal(db.inserts.length, 0)
+  })
+
+  test('marcador en vivo sin ganador, sin previo (0-0 inicial) → no hace nada', async () => {
+    const db = fakeDb([])
+    await scoreKnockoutAdvancement(null, 'round_of_16', null, db)
+    assert.equal(db.deletes.length, 0)
+    assert.equal(db.inserts.length, 0)
+  })
+
+  test('mismo ganador re-confirmado → idempotente (no borra entradas del previo)', async () => {
+    // prevTeamId === teamId → no hace el DELETE extra del previo
+    const db = fakeDb([
       { rows: [{ points_classify: 10 }] },
       { rows: [{ user_id: 'u1' }] },
     ])
-    await scoreKnockoutAdvancement('team-a', 'round_of_16', db2)
-    assert.equal(db2.inserts.length, 1)
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', 'team-a', db)
+    // Solo 1 DELETE: el idempotente del propio team-a (no el de prevTeamId)
+    assert.equal(db.deletes.length, 1)
+    assert.equal(db.inserts.length, 1)
   })
 })
 

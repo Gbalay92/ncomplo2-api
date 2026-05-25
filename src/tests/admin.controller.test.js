@@ -72,14 +72,16 @@ describe('setKnockoutResult', () => {
     assert.equal(res._status, 400)
   })
 
-  test('empate sin winner_id → 400 antes de tocar la BD', async () => {
-    const db = fakeDb()
-    const { setKnockoutResult } = makeAdminController(db, fakeScoringFns().scoring)
+  test('empate sin winner_id → 200 (marcador en vivo permitido, sin scoring)', async () => {
+    const slotRow = { slot_id: 'slot-1', stage: 'round_of_32', real_winner_id: null, prev_winner_id: null }
+    const db = fakeDb([{ rows: [slotRow] }])
+    const { scoring, calls } = fakeScoringFns()
+    const { setKnockoutResult } = makeAdminController(db, scoring)
     const req = fakeReq({ params: { slot_id: 'slot-1' }, body: { home_goals: 1, away_goals: 1 } })
     const res = fakeRes()
     await setKnockoutResult(req, res)
-    assert.equal(res._status, 400)
-    assert.equal(db.updates.length, 0)
+    assert.equal(res._status, 200)
+    assert.equal(calls.length, 0) // sin winner_id → no se puntúa
   })
 
   test('slot no encontrado → 404', async () => {
@@ -92,7 +94,7 @@ describe('setKnockoutResult', () => {
   })
 
   test('victoria en R32 → 200, llama scoreKnockoutAdvancement con winner y round_of_16', async () => {
-    const updatedRow = { slot_id: 'slot-r32', stage: 'round_of_32', real_winner_id: 'team-a' }
+    const updatedRow = { slot_id: 'slot-r32', stage: 'round_of_32', real_winner_id: 'team-a', prev_winner_id: null }
     const db = fakeDb([{ rows: [updatedRow] }])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
@@ -104,10 +106,11 @@ describe('setKnockoutResult', () => {
     assert.equal(calls[0].fn, 'scoreKnockoutAdvancement')
     assert.equal(calls[0].args[0], 'team-a')        // winner
     assert.equal(calls[0].args[1], 'round_of_16')   // next stage
+    assert.equal(calls[0].args[2], null)             // prev_winner_id
   })
 
   test('victoria en penaltis (empate + winner_id) → scoreKnockoutAdvancement, NO scoreChampion', async () => {
-    const updatedRow = { slot_id: 'slot-qf', stage: 'quarter_final', real_winner_id: 'team-b' }
+    const updatedRow = { slot_id: 'slot-qf', stage: 'quarter_final', real_winner_id: 'team-b', prev_winner_id: null }
     const db = fakeDb([{ rows: [updatedRow] }])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
@@ -121,8 +124,39 @@ describe('setKnockoutResult', () => {
     assert.equal(calls[0].args[1], 'semi_final')
   })
 
+  test('ganador cambia (1-0 team-a → 1-2 team-b) → scoreKnockoutAdvancement con prevTeamId', async () => {
+    const updatedRow = { slot_id: 'slot-r32', stage: 'round_of_32', real_winner_id: 'team-b', prev_winner_id: 'team-a' }
+    const db = fakeDb([{ rows: [updatedRow] }])
+    const { scoring, calls } = fakeScoringFns()
+    const { setKnockoutResult } = makeAdminController(db, scoring)
+    const req = fakeReq({ params: { slot_id: 'slot-r32' }, body: { home_goals: 1, away_goals: 2, winner_id: 'team-b' } })
+    const res = fakeRes()
+    await setKnockoutResult(req, res)
+    assert.equal(res._status, 200)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].fn, 'scoreKnockoutAdvancement')
+    assert.equal(calls[0].args[0], 'team-b')       // nuevo ganador
+    assert.equal(calls[0].args[1], 'round_of_16')
+    assert.equal(calls[0].args[2], 'team-a')       // prevTeamId → se limpiarán sus entradas
+  })
+
+  test('vuelve a 1-1 sin ganador (prev team-a) → scoreKnockoutAdvancement con null winner', async () => {
+    const updatedRow = { slot_id: 'slot-r32', stage: 'round_of_32', real_winner_id: null, prev_winner_id: 'team-a' }
+    const db = fakeDb([{ rows: [updatedRow] }])
+    const { scoring, calls } = fakeScoringFns()
+    const { setKnockoutResult } = makeAdminController(db, scoring)
+    const req = fakeReq({ params: { slot_id: 'slot-r32' }, body: { home_goals: 1, away_goals: 1 } })
+    const res = fakeRes()
+    await setKnockoutResult(req, res)
+    assert.equal(res._status, 200)
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].fn, 'scoreKnockoutAdvancement')
+    assert.equal(calls[0].args[0], null)            // sin ganador
+    assert.equal(calls[0].args[2], 'team-a')        // prevTeamId → sus entradas se borrarán
+  })
+
   test('resultado final con ganador → scoreKnockoutAdvancement(final) + scoreChampion', async () => {
-    const updatedRow = { slot_id: 'slot-final', stage: 'final', real_winner_id: 'team-a' }
+    const updatedRow = { slot_id: 'slot-final', stage: 'final', real_winner_id: 'team-a', prev_winner_id: null }
     const db = fakeDb([{ rows: [updatedRow] }])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
@@ -137,7 +171,7 @@ describe('setKnockoutResult', () => {
   })
 
   test('resultado final sin winner_id → ni scoreKnockoutAdvancement ni scoreChampion', async () => {
-    const updatedRow = { slot_id: 'slot-final', stage: 'final', real_winner_id: null }
+    const updatedRow = { slot_id: 'slot-final', stage: 'final', real_winner_id: null, prev_winner_id: null }
     const db = fakeDb([{ rows: [updatedRow] }])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
@@ -149,7 +183,7 @@ describe('setKnockoutResult', () => {
   })
 
   test('semifinal winner → scoreKnockoutAdvancement con stage=final (finalista)', async () => {
-    const updatedRow = { slot_id: 'slot-sf', stage: 'semi_final', real_winner_id: 'team-c' }
+    const updatedRow = { slot_id: 'slot-sf', stage: 'semi_final', real_winner_id: 'team-c', prev_winner_id: null }
     const db = fakeDb([{ rows: [updatedRow] }])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
