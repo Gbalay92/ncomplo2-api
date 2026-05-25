@@ -230,7 +230,7 @@ CREATE TABLE score_log (
     points      INT         NOT NULL CHECK (points >= 0),
     scored_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    UNIQUE (user_id, event_type, event_ref)
+    UNIQUE (user_id, event_type, event_ref, stage)
 );
 
 -- ============================================================
