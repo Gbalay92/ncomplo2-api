@@ -77,37 +77,67 @@ describe('scoreGroupMatch', () => {
 })
 
 // ─── scoreKnockoutSlot ────────────────────────────────────────────────────────
+// Puntúa CLASIFICACIÓN: el equipo predicho debe estar en el slot (local o visitante).
+// Se llama cuando los equipos del slot son confirmados, no cuando se juega el partido.
 
 describe('scoreKnockoutSlot', () => {
-  test('R16 — acierta el clasificado → 10 pts', async () => {
+
+  test('equipo local en el slot acertado → 5 pts (R32)', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', real_winner_id: 'team-a', home_team_id: 'team-a', away_team_id: 'team-b' }] },
-      { rows: [{ points_classify: 10 }] },
+      { rows: [{ stage: 'round_of_32', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ points_classify: 5 }] },
       { rows: [{ user_id: 'u1', pred_winner_id: 'team-a' }] },
+    ])
+    await scoreKnockoutSlot(SLOT_ID, db)
+    assert.equal(db.inserts.length, 1)
+    assert.equal(db.inserts[0][3], 5)
+  })
+
+  test('equipo visitante en el slot acertado → 10 pts (R16)', async () => {
+    const db = fakeDb([
+      { rows: [{ stage: 'round_of_16', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ points_classify: 10 }] },
+      { rows: [{ user_id: 'u1', pred_winner_id: 'team-b' }] },
     ])
     await scoreKnockoutSlot(SLOT_ID, db)
     assert.equal(db.inserts.length, 1)
     assert.equal(db.inserts[0][3], 10)
   })
 
-  test('R16 — falla el clasificado → no inserta nada', async () => {
+  test('equipo NO en el slot → no inserta nada', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', real_winner_id: 'team-a', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ stage: 'round_of_16', home_team_id: 'team-a', away_team_id: 'team-b' }] },
       { rows: [{ points_classify: 10 }] },
-      { rows: [{ user_id: 'u1', pred_winner_id: 'team-b' }] },
+      { rows: [{ user_id: 'u1', pred_winner_id: 'team-c' }] },
     ])
     await scoreKnockoutSlot(SLOT_ID, db)
     assert.equal(db.inserts.length, 0)
   })
 
-  test('Final — ambos finalistas puntúan', async () => {
+  test('múltiples predicciones — local, visitante, fuera del slot', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'final', real_winner_id: 'team-a', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ stage: 'round_of_32', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ points_classify: 5 }] },
+      { rows: [
+        { user_id: 'u1', pred_winner_id: 'team-a' }, // local → 5
+        { user_id: 'u2', pred_winner_id: 'team-b' }, // visitante → 5
+        { user_id: 'u3', pred_winner_id: 'team-c' }, // fuera → 0
+      ]},
+    ])
+    await scoreKnockoutSlot(SLOT_ID, db)
+    assert.equal(db.inserts.length, 2)
+    assert.equal(db.inserts[0][3], 5) // u1
+    assert.equal(db.inserts[1][3], 5) // u2
+  })
+
+  test('Final — ambos finalistas puntúan (35 pts c/u)', async () => {
+    const db = fakeDb([
+      { rows: [{ stage: 'final', home_team_id: 'team-a', away_team_id: 'team-b' }] },
       { rows: [{ points_classify: 35 }] },
       { rows: [
-        { user_id: 'u1', pred_winner_id: 'team-a' }, // ganador → 35
-        { user_id: 'u2', pred_winner_id: 'team-b' }, // finalista → 35
-        { user_id: 'u3', pred_winner_id: 'team-c' }, // no llegó → 0
+        { user_id: 'u1', pred_winner_id: 'team-a' }, // → 35
+        { user_id: 'u2', pred_winner_id: 'team-b' }, // → 35
+        { user_id: 'u3', pred_winner_id: 'team-c' }, // → 0
       ]},
     ])
     await scoreKnockoutSlot(SLOT_ID, db)
@@ -116,9 +146,23 @@ describe('scoreKnockoutSlot', () => {
     assert.equal(db.inserts[1][3], 35) // u2
   })
 
-  test('sin ganador aún → no puntúa', async () => {
+  test('solo un equipo confirmado (away null) — puntúa si lo predijiste', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', real_winner_id: null, home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ stage: 'round_of_16', home_team_id: 'team-a', away_team_id: null }] },
+      { rows: [{ points_classify: 10 }] },
+      { rows: [
+        { user_id: 'u1', pred_winner_id: 'team-a' }, // confirmado → 10
+        { user_id: 'u2', pred_winner_id: 'team-b' }, // no confirmado aún → 0
+      ]},
+    ])
+    await scoreKnockoutSlot(SLOT_ID, db)
+    assert.equal(db.inserts.length, 1)
+    assert.equal(db.inserts[0][3], 10)
+  })
+
+  test('ningún equipo en el slot aún → no puntúa', async () => {
+    const db = fakeDb([
+      { rows: [{ stage: 'round_of_16', home_team_id: null, away_team_id: null }] },
     ])
     await scoreKnockoutSlot(SLOT_ID, db)
     assert.equal(db.inserts.length, 0)

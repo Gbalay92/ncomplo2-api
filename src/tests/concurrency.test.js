@@ -140,7 +140,10 @@ describe('setKnockoutResult — optimistic locking', () => {
       slot_id: 'slot-1', stage: 'round_of_16',
       real_home_goals: 2, real_away_goals: 0, real_winner_id: 'team-a', updated_at: T1,
     }
-    const db = fakeDb([{ rows: [slotRow] }])
+    const db = fakeDb([
+      { rows: [slotRow] },                      // UPDATE real_bracket
+      { rows: [{ slot_id: 'next-slot' }] },     // SELECT next slots
+    ])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
 
@@ -178,10 +181,13 @@ describe('setKnockoutResult — optimistic locking', () => {
   test('dos admins simultáneos en la final — solo uno activa scoreChampion', async () => {
     const slotRow = { slot_id: 'slot-final', stage: 'final', real_winner_id: 'team-a', updated_at: T1 }
 
-    const db1 = fakeDb([{ rows: [slotRow] }])
+    const db1 = fakeDb([
+      { rows: [slotRow] },                        // UPDATE real_bracket
+      { rows: [] },                               // SELECT next slots → vacío (no hay slot tras la final)
+    ])
     const db2 = fakeDb([
-      { rows: [] },                           // UPDATE → 0 filas
-      { rows: [{ slot_id: 'slot-final' }] },  // SELECT EXISTS → existe
+      { rows: [] },                               // UPDATE → 0 filas
+      { rows: [{ slot_id: 'slot-final' }] },      // SELECT EXISTS → existe
     ])
     const { scoring: s1, calls: calls1 } = fakeScoringFns()
     const { scoring: s2, calls: calls2 } = fakeScoringFns()
@@ -208,10 +214,9 @@ describe('setKnockoutResult — optimistic locking', () => {
     assert.equal(res1._status, 200)
     assert.equal(res2._status, 409)
 
-    // Solo el ganador activa scoreKnockoutSlot + scoreChampion
-    assert.equal(calls1.length, 2)
-    assert.equal(calls1[0].fn, 'scoreKnockoutSlot')
-    assert.equal(calls1[1].fn, 'scoreChampion')
+    // La final no tiene slot siguiente → solo scoreChampion para el ganador
+    assert.equal(calls1.length, 1)
+    assert.equal(calls1[0].fn, 'scoreChampion')
 
     // El perdedor no activa nada
     assert.equal(calls2.length, 0)
