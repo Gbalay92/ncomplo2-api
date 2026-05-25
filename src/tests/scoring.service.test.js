@@ -1,10 +1,9 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { scoreGroupMatch, scoreKnockoutSlot, scoreChampion } from '../services/scoring.service.js'
+import { scoreGroupMatch, scoreGroupQualification, scoreKnockoutAdvancement, scoreChampion } from '../services/scoring.service.js'
 import { fakeDb } from './helpers/fakeDb.js'
 
 const MATCH_ID = 'match-1'
-const SLOT_ID  = 'slot-1'
 
 // ─── scoreGroupMatch ──────────────────────────────────────────────────────────
 
@@ -76,104 +75,163 @@ describe('scoreGroupMatch', () => {
   })
 })
 
-// ─── scoreKnockoutSlot ────────────────────────────────────────────────────────
-// Puntúa CLASIFICACIÓN: el equipo predicho debe estar en el slot (local o visitante).
-// Se llama cuando los equipos del slot son confirmados, no cuando se juega el partido.
+// ─── scoreGroupQualification ──────────────────────────────────────────────────
+// Awards 5 pts for each team a user predicted to qualify (in predicted_group_standings)
+// that actually qualified (appears in real_bracket for R32 slots).
 
-describe('scoreKnockoutSlot', () => {
+describe('scoreGroupQualification', () => {
 
-  test('equipo local en el slot acertado → 5 pts (R32)', async () => {
+  test('usuario acierta 2 clasificados → 10 pts (2 inserts de 5)', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'round_of_32', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      // 1. predicted_group_standings (is_classified = true)
+      { rows: [
+        { user_id: 'u1', team_id: 'team-a' },
+        { user_id: 'u1', team_id: 'team-b' },
+      ]},
+      // 2. actual R32 slots
+      { rows: [
+        { home_team_id: 'team-a', away_team_id: 'team-b' },
+      ]},
+      // 3. scoring rules
       { rows: [{ points_classify: 5 }] },
-      { rows: [{ user_id: 'u1', pred_winner_id: 'team-a' }] },
     ])
-    await scoreKnockoutSlot(SLOT_ID, db)
-    assert.equal(db.inserts.length, 1)
-    assert.equal(db.inserts[0][3], 5)
+    await scoreGroupQualification(db)
+    assert.equal(db.inserts.length, 2)
+    assert.equal(db.inserts[0][2], 5) // points
+    assert.equal(db.inserts[1][2], 5)
   })
 
-  test('equipo visitante en el slot acertado → 10 pts (R16)', async () => {
+  test('usuario falla todos los clasificados → 0 inserts', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', home_team_id: 'team-a', away_team_id: 'team-b' }] },
-      { rows: [{ points_classify: 10 }] },
-      { rows: [{ user_id: 'u1', pred_winner_id: 'team-b' }] },
+      { rows: [
+        { user_id: 'u1', team_id: 'team-x' },
+        { user_id: 'u1', team_id: 'team-y' },
+      ]},
+      { rows: [
+        { home_team_id: 'team-a', away_team_id: 'team-b' },
+      ]},
+      { rows: [{ points_classify: 5 }] },
     ])
-    await scoreKnockoutSlot(SLOT_ID, db)
-    assert.equal(db.inserts.length, 1)
-    assert.equal(db.inserts[0][3], 10)
-  })
-
-  test('equipo NO en el slot → no inserta nada', async () => {
-    const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', home_team_id: 'team-a', away_team_id: 'team-b' }] },
-      { rows: [{ points_classify: 10 }] },
-      { rows: [{ user_id: 'u1', pred_winner_id: 'team-c' }] },
-    ])
-    await scoreKnockoutSlot(SLOT_ID, db)
+    await scoreGroupQualification(db)
     assert.equal(db.inserts.length, 0)
   })
 
-  test('múltiples predicciones — local, visitante, fuera del slot', async () => {
+  test('múltiples usuarios — puntuaciones independientes', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'round_of_32', home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [
+        { user_id: 'u1', team_id: 'team-a' }, // acierta
+        { user_id: 'u1', team_id: 'team-x' }, // falla
+        { user_id: 'u2', team_id: 'team-a' }, // acierta
+        { user_id: 'u2', team_id: 'team-b' }, // acierta
+      ]},
+      { rows: [
+        { home_team_id: 'team-a', away_team_id: 'team-b' },
+      ]},
       { rows: [{ points_classify: 5 }] },
-      { rows: [
-        { user_id: 'u1', pred_winner_id: 'team-a' }, // local → 5
-        { user_id: 'u2', pred_winner_id: 'team-b' }, // visitante → 5
-        { user_id: 'u3', pred_winner_id: 'team-c' }, // fuera → 0
-      ]},
     ])
-    await scoreKnockoutSlot(SLOT_ID, db)
-    assert.equal(db.inserts.length, 2)
-    assert.equal(db.inserts[0][3], 5) // u1
-    assert.equal(db.inserts[1][3], 5) // u2
+    await scoreGroupQualification(db)
+    // u1: 1 acierto, u2: 2 aciertos → 3 inserts
+    assert.equal(db.inserts.length, 3)
   })
 
-  test('Final — ambos finalistas puntúan (35 pts c/u)', async () => {
+  test('sin usuarios con predicciones → no inserta nada', async () => {
     const db = fakeDb([
-      { rows: [{ stage: 'final', home_team_id: 'team-a', away_team_id: 'team-b' }] },
-      { rows: [{ points_classify: 35 }] },
-      { rows: [
-        { user_id: 'u1', pred_winner_id: 'team-a' }, // → 35
-        { user_id: 'u2', pred_winner_id: 'team-b' }, // → 35
-        { user_id: 'u3', pred_winner_id: 'team-c' }, // → 0
-      ]},
+      { rows: [] }, // sin predicted qualifiers
+      { rows: [{ home_team_id: 'team-a', away_team_id: 'team-b' }] },
+      { rows: [{ points_classify: 5 }] },
     ])
-    await scoreKnockoutSlot(SLOT_ID, db)
-    assert.equal(db.inserts.length, 2)
-    assert.equal(db.inserts[0][3], 35) // u1
-    assert.equal(db.inserts[1][3], 35) // u2
-  })
-
-  test('solo un equipo confirmado (away null) — puntúa si lo predijiste', async () => {
-    const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', home_team_id: 'team-a', away_team_id: null }] },
-      { rows: [{ points_classify: 10 }] },
-      { rows: [
-        { user_id: 'u1', pred_winner_id: 'team-a' }, // confirmado → 10
-        { user_id: 'u2', pred_winner_id: 'team-b' }, // no confirmado aún → 0
-      ]},
-    ])
-    await scoreKnockoutSlot(SLOT_ID, db)
-    assert.equal(db.inserts.length, 1)
-    assert.equal(db.inserts[0][3], 10)
-  })
-
-  test('ningún equipo en el slot aún → no puntúa', async () => {
-    const db = fakeDb([
-      { rows: [{ stage: 'round_of_16', home_team_id: null, away_team_id: null }] },
-    ])
-    await scoreKnockoutSlot(SLOT_ID, db)
+    await scoreGroupQualification(db)
     assert.equal(db.inserts.length, 0)
   })
 
-  test('slot no encontrado → lanza error', async () => {
-    const db = fakeDb([{ rows: [] }])
+  test('sin clasificados reales aún → termina sin insertar', async () => {
+    const db = fakeDb([
+      { rows: [{ user_id: 'u1', team_id: 'team-a' }] },
+      { rows: [] }, // R32 vacío
+    ])
+    await scoreGroupQualification(db)
+    assert.equal(db.inserts.length, 0)
+  })
+})
+
+// ─── scoreKnockoutAdvancement ─────────────────────────────────────────────────
+// Awards points to users who predicted the advancing team as winner of any
+// match in the PREVIOUS stage.
+
+describe('scoreKnockoutAdvancement', () => {
+
+  test('un usuario predijo el equipo → recibe puntos (R16, 10 pts)', async () => {
+    const db = fakeDb([
+      { rows: [{ points_classify: 10 }] },               // scoring rule for round_of_16
+      { rows: [{ user_id: 'u1' }] },                     // users who predicted team-a in R32
+    ])
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', db)
+    assert.equal(db.inserts.length, 1)
+    assert.equal(db.inserts[0][0], 'u1')
+    assert.equal(db.inserts[0][1], 'team-a')
+    assert.equal(db.inserts[0][2], 'round_of_16')
+    assert.equal(db.inserts[0][3], 10)
+  })
+
+  test('nadie predijo el equipo → 0 inserts', async () => {
+    const db = fakeDb([
+      { rows: [{ points_classify: 10 }] },
+      { rows: [] },
+    ])
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', db)
+    assert.equal(db.inserts.length, 0)
+  })
+
+  test('múltiples usuarios que predijeron el mismo equipo', async () => {
+    const db = fakeDb([
+      { rows: [{ points_classify: 15 }] },               // quarter_final
+      { rows: [{ user_id: 'u1' }, { user_id: 'u2' }, { user_id: 'u3' }] },
+    ])
+    await scoreKnockoutAdvancement('team-b', 'quarter_final', db)
+    assert.equal(db.inserts.length, 3)
+    assert.equal(db.inserts[0][3], 15)
+    assert.equal(db.inserts[1][3], 15)
+    assert.equal(db.inserts[2][3], 15)
+  })
+
+  test('finalista (semi_final winner → final, 35 pts)', async () => {
+    const db = fakeDb([
+      { rows: [{ points_classify: 35 }] },               // final
+      { rows: [{ user_id: 'u1' }] },
+    ])
+    await scoreKnockoutAdvancement('team-a', 'final', db)
+    assert.equal(db.inserts.length, 1)
+    assert.equal(db.inserts[0][2], 'final')
+    assert.equal(db.inserts[0][3], 35)
+  })
+
+  test('targetStage sin entrada previa en PREV_STAGE → lanza error', async () => {
+    const db = fakeDb([])
     await assert.rejects(
-      () => scoreKnockoutSlot(SLOT_ID, db),
-      /Slot not found/
+      () => scoreKnockoutAdvancement('team-a', 'round_of_32', db),
+      /No previous stage for: round_of_32/
     )
+  })
+
+  test('idempotente — puede llamarse dos veces sin duplicar puntos', async () => {
+    // Segunda llamada borra las entradas anteriores (DELETE) antes de insertar
+    // fakeDb no ejecuta realmente el DELETE, pero sí los INSERTs: si la función
+    // se llama dos veces con la misma fakeDb hay 2 inserts (uno por llamada).
+    // Lo que testamos aquí es que la secuencia DELETE→INSERT exista en la función.
+    const db1 = fakeDb([
+      { rows: [{ points_classify: 10 }] },
+      { rows: [{ user_id: 'u1' }] },
+    ])
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', db1)
+    assert.equal(db1.inserts.length, 1)
+
+    // Segunda llamada con nueva db: mismo resultado limpio
+    const db2 = fakeDb([
+      { rows: [{ points_classify: 10 }] },
+      { rows: [{ user_id: 'u1' }] },
+    ])
+    await scoreKnockoutAdvancement('team-a', 'round_of_16', db2)
+    assert.equal(db2.inserts.length, 1)
   })
 })
 

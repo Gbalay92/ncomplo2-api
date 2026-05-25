@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { getOutcome, scoreGroupPrediction, scoreKnockoutPick } from '../services/scoring.utils.js'
+import { getOutcome, scoreGroupPrediction, NEXT_STAGE } from '../services/scoring.utils.js'
 
 const POINTS_SIGN  = 2
 const POINTS_EXACT = 3
@@ -40,34 +40,12 @@ describe('scoreGroupPrediction', () => {
   })
 })
 
-// ─── scoreKnockoutPick ────────────────────────────────────────────────────────
-// Lógica uniforme para todas las rondas: puntúa si el equipo predicho
-// está en el slot (como local O visitante), independientemente del ganador.
+// ─── NEXT_STAGE ───────────────────────────────────────────────────────────────
 
-const TEAM_A = 'team-a'
-const TEAM_B = 'team-b'
-const TEAM_C = 'team-c'
-
-describe('scoreKnockoutPick', () => {
-  test('predice el equipo local → points_classify',    () =>
-    assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 5), 5))
-
-  test('predice el equipo visitante → points_classify', () =>
-    assert.equal(scoreKnockoutPick(TEAM_B, TEAM_A, TEAM_B, 10), 10))
-
-  test('predice equipo fuera del slot → 0',             () =>
-    assert.equal(scoreKnockoutPick(TEAM_C, TEAM_A, TEAM_B, 5), 0))
-
-  test('solo home confirmado (away null) — predice home → points_classify', () =>
-    assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, null, 5), 5))
-
-  test('solo home confirmado (away null) — predice otro → 0',               () =>
-    assert.equal(scoreKnockoutPick(TEAM_C, TEAM_A, null, 5), 0))
-
-  test('R32:   5 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B,  5),  5))
-  test('R16:  10 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 10), 10))
-  test('QF:   15 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 15), 15))
-  test('SF:   25 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 25), 25))
-  test('Final: 35 pts (cualquier finalista)', () =>
-    assert.equal(scoreKnockoutPick(TEAM_B, TEAM_A, TEAM_B, 35), 35))
+describe('NEXT_STAGE', () => {
+  test('R32 → R16',      () => assert.equal(NEXT_STAGE['round_of_32'],   'round_of_16'))
+  test('R16 → QF',       () => assert.equal(NEXT_STAGE['round_of_16'],   'quarter_final'))
+  test('QF  → SF',       () => assert.equal(NEXT_STAGE['quarter_final'], 'semi_final'))
+  test('SF  → Final',    () => assert.equal(NEXT_STAGE['semi_final'],    'final'))
+  test('Final → sin siguiente', () => assert.equal(NEXT_STAGE['final'],  undefined))
 })

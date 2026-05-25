@@ -36,9 +36,10 @@ export function fakeRes() {
 export function fakeScoringFns() {
   const calls = []
   const scoring = {
-    scoreGroupMatch:   async (...args) => calls.push({ fn: 'scoreGroupMatch',   args }),
-    scoreKnockoutSlot: async (...args) => calls.push({ fn: 'scoreKnockoutSlot', args }),
-    scoreChampion:     async (...args) => calls.push({ fn: 'scoreChampion',     args }),
+    scoreGroupMatch:        async (...args) => calls.push({ fn: 'scoreGroupMatch',        args }),
+    scoreGroupQualification:async (...args) => calls.push({ fn: 'scoreGroupQualification',args }),
+    scoreKnockoutAdvancement:async (...args) => calls.push({ fn: 'scoreKnockoutAdvancement',args }),
+    scoreChampion:          async (...args) => calls.push({ fn: 'scoreChampion',          args }),
   }
   return { scoring, calls }
 }

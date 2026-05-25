@@ -141,7 +141,7 @@ describe('lockGroupStage', () => {
     assert.equal(db.inserts[2][2], null) // 2F tampoco
   })
 
-  test('tras sembrar R32, llama a scoreKnockoutSlot para cada slot', async () => {
+  test('tras sembrar R32, llama a scoreGroupQualification una sola vez', async () => {
     const qualMap = { '1A': 'ta1', '2B': 'tb2', '1C': 'tc1', '2D': 'td2' }
 
     const db = fakeDb([
@@ -159,10 +159,8 @@ describe('lockGroupStage', () => {
     await lockGroupStage(fakeReq(), res)
 
     assert.equal(res._status, 200)
-    assert.equal(calls.length, 2)
-    assert.equal(calls[0].fn, 'scoreKnockoutSlot')
-    assert.equal(calls[0].args[0], 'slot-r32-1')
-    assert.equal(calls[1].fn, 'scoreKnockoutSlot')
-    assert.equal(calls[1].args[0], 'slot-r32-2')
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].fn, 'scoreGroupQualification')
+    // Sin args: no necesita slot IDs, trabaja contra la BD directamente
   })
 })

@@ -1,7 +1,17 @@
 import pool from '../db/pool.js'
-import { scoreGroupPrediction, scoreKnockoutPick } from './scoring.utils.js'
+import { scoreGroupPrediction } from './scoring.utils.js'
 
+// Stage that feeds into each knockout stage — used to know which predictions to look up.
+const PREV_STAGE = {
+  round_of_16:   'round_of_32',
+  quarter_final: 'round_of_16',
+  semi_final:    'quarter_final',
+  final:         'semi_final',
+}
+
+// ─── scoreGroupMatch ──────────────────────────────────────────────────────────
 // Called after admin enters a group match result.
+
 export async function scoreGroupMatch(matchId, db = pool) {
   const client = await db.connect()
   try {
@@ -54,58 +64,57 @@ export async function scoreGroupMatch(matchId, db = pool) {
   }
 }
 
-// Scores classification for a knockout slot — awards points to users who
-// predicted a team that IS in this slot (home or away).
-// Called:
-//   - by lockGroupStage for every R32 slot (teams just confirmed from groups)
-//   - by setKnockoutResult for the NEXT slot after each match result
-//     (e.g. after an R32 result → scores the R16 slot the winner feeds into)
-export async function scoreKnockoutSlot(slotId, db = pool) {
+// ─── scoreGroupQualification ──────────────────────────────────────────────────
+// Called once from lockGroupStage after R32 is seeded.
+// Compares each user's predicted 32 qualifiers (stored in predicted_group_standings)
+// against the actual 32 qualifiers (from real_bracket for round_of_32 slots).
+// Awards points_classify for each correct team.
+// Max: 32 teams × points_classify = 32 × 5 = 160 pts.
+
+export async function scoreGroupQualification(db = pool) {
   const client = await db.connect()
   try {
     await client.query('BEGIN')
 
-    const { rows: slotRows } = await client.query(`
-      SELECT ks.stage, rb.home_team_id, rb.away_team_id
-      FROM knockout_slots ks
-      JOIN real_bracket rb ON rb.slot_id = ks.id
-      WHERE ks.id = $1
-    `, [slotId])
-    if (!slotRows.length) throw new Error('Slot not found')
-    const { stage, home_team_id, away_team_id } = slotRows[0]
+    // All users' predicted qualifiers (already computed and persisted)
+    const { rows: predictedQuals } = await client.query(`
+      SELECT user_id, team_id
+      FROM predicted_group_standings
+      WHERE is_classified = true
+    `)
 
-    // Nothing to score if no teams have been confirmed for this slot yet
-    if (!home_team_id && !away_team_id) {
+    // Actual R32 qualifiers (just seeded by lockGroupStage)
+    const { rows: r32Slots } = await client.query(`
+      SELECT rb.home_team_id, rb.away_team_id
+      FROM real_bracket rb
+      JOIN knockout_slots ks ON ks.id = rb.slot_id
+      WHERE ks.stage = 'round_of_32'
+    `)
+    const actualQualifiers = new Set(
+      r32Slots.flatMap(s => [s.home_team_id, s.away_team_id].filter(Boolean))
+    )
+
+    if (actualQualifiers.size === 0) {
       await client.query('COMMIT')
       return
     }
 
-    // Idempotent: delete previous classification entries for this slot
-    await client.query(
-      "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1",
-      [slotId]
-    )
-
     const { rows: rules } = await client.query(
-      'SELECT points_classify FROM scoring_rules WHERE stage = $1',
-      [stage]
+      "SELECT points_classify FROM scoring_rules WHERE stage = 'round_of_32'"
     )
-    if (!rules.length) throw new Error(`No scoring rule for stage: ${stage}`)
     const { points_classify } = rules[0]
 
-    const { rows: predictions } = await client.query(`
-      SELECT user_id, pred_winner_id
-      FROM predicted_bracket
-      WHERE slot_id = $1 AND pred_winner_id IS NOT NULL
-    `, [slotId])
+    // Idempotent: wipe previous R32 classification entries
+    await client.query(
+      "DELETE FROM score_log WHERE event_type = 'classification' AND stage = 'round_of_32'"
+    )
 
-    for (const { user_id, pred_winner_id } of predictions) {
-      const pts = scoreKnockoutPick(pred_winner_id, home_team_id, away_team_id, points_classify)
-      if (pts > 0) {
+    for (const { user_id, team_id } of predictedQuals) {
+      if (actualQualifiers.has(team_id)) {
         await client.query(`
           INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
-          VALUES ($1, 'classification', $2, $3, $4)
-        `, [user_id, slotId, stage, pts])
+          VALUES ($1, 'classification', $2, 'round_of_32', $3)
+        `, [user_id, team_id, points_classify])
       }
     }
 
@@ -118,7 +127,68 @@ export async function scoreKnockoutSlot(slotId, db = pool) {
   }
 }
 
+// ─── scoreKnockoutAdvancement ─────────────────────────────────────────────────
+// Called from setKnockoutResult when a team wins a knockout match and advances
+// to the next stage.
+//
+// teamId   — the team that just advanced
+// targetStage — the stage they advanced INTO (e.g. 'round_of_16' when winning R32)
+//
+// Awards targetStage's points_classify to every user who had teamId as their
+// predicted winner of ANY match in the PREVIOUS stage (PREV_STAGE[targetStage]).
+// Max per team: one entry per user who predicted them.
+// Total max per round: N_teams_in_stage × points_classify
+//   R16:  16 × 10 = 160 pts   QF:    8 × 15 = 120 pts
+//   SF:    4 × 25 = 100 pts   Final: 2 × 35 =  70 pts
+
+export async function scoreKnockoutAdvancement(teamId, targetStage, db = pool) {
+  const client = await db.connect()
+  try {
+    await client.query('BEGIN')
+
+    const sourceStage = PREV_STAGE[targetStage]
+    if (!sourceStage) throw new Error(`No previous stage for: ${targetStage}`)
+
+    const { rows: rules } = await client.query(
+      'SELECT points_classify FROM scoring_rules WHERE stage = $1',
+      [targetStage]
+    )
+    if (!rules.length) throw new Error(`No scoring rule for stage: ${targetStage}`)
+    const { points_classify } = rules[0]
+
+    // Users who predicted teamId to win any match in the source stage
+    const { rows: users } = await client.query(`
+      SELECT pb.user_id
+      FROM predicted_bracket pb
+      JOIN knockout_slots ks ON ks.id = pb.slot_id
+      WHERE ks.stage = $1 AND pb.pred_winner_id = $2
+    `, [sourceStage, teamId])
+
+    // Idempotent: delete previous entries for this team's advancement to targetStage
+    await client.query(
+      "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1 AND stage = $2",
+      [teamId, targetStage]
+    )
+
+    for (const { user_id } of users) {
+      await client.query(`
+        INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
+        VALUES ($1, 'classification', $2, $3, $4)
+      `, [user_id, teamId, targetStage, points_classify])
+    }
+
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+// ─── scoreChampion ────────────────────────────────────────────────────────────
 // Called after the final result is confirmed.
+
 export async function scoreChampion(db = pool) {
   const client = await db.connect()
   try {
