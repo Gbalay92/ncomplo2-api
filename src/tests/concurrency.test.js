@@ -135,15 +135,12 @@ describe('setGroupMatchResult — optimistic locking', () => {
 
 describe('setKnockoutResult — optimistic locking', () => {
 
-  test('current_updated_at correcto → 200', async () => {
+  test('current_updated_at correcto → 200, scoreKnockoutAdvancement llamado', async () => {
     const slotRow = {
       slot_id: 'slot-1', stage: 'round_of_16',
       real_home_goals: 2, real_away_goals: 0, real_winner_id: 'team-a', updated_at: T1,
     }
-    const db = fakeDb([
-      { rows: [slotRow] },                      // UPDATE real_bracket
-      { rows: [{ slot_id: 'next-slot' }] },     // SELECT next slots
-    ])
+    const db = fakeDb([{ rows: [slotRow] }])
     const { scoring, calls } = fakeScoringFns()
     const { setKnockoutResult } = makeAdminController(db, scoring)
 
@@ -155,7 +152,9 @@ describe('setKnockoutResult — optimistic locking', () => {
     await setKnockoutResult(req, res)
 
     assert.equal(res._status, 200)
-    assert.equal(calls[0].fn, 'scoreKnockoutSlot')
+    assert.equal(calls[0].fn, 'scoreKnockoutAdvancement')
+    assert.equal(calls[0].args[0], 'team-a')
+    assert.equal(calls[0].args[1], 'quarter_final') // round_of_16 winner → QF
   })
 
   test('current_updated_at obsoleto → 409, scorer NO llamado', async () => {
@@ -181,10 +180,7 @@ describe('setKnockoutResult — optimistic locking', () => {
   test('dos admins simultáneos en la final — solo uno activa scoreChampion', async () => {
     const slotRow = { slot_id: 'slot-final', stage: 'final', real_winner_id: 'team-a', updated_at: T1 }
 
-    const db1 = fakeDb([
-      { rows: [slotRow] },                        // UPDATE real_bracket
-      { rows: [] },                               // SELECT next slots → vacío (no hay slot tras la final)
-    ])
+    const db1 = fakeDb([{ rows: [slotRow] }])
     const db2 = fakeDb([
       { rows: [] },                               // UPDATE → 0 filas
       { rows: [{ slot_id: 'slot-final' }] },      // SELECT EXISTS → existe

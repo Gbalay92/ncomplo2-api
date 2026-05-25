@@ -10,11 +10,12 @@ export function scoreGroupPrediction(predHome, predAway, realHome, realAway, poi
   return 0
 }
 
-// Scores whether a user's bracket pick is present in a knockout slot.
-// Points are awarded for CLASSIFICATION — the predicted team being IN the slot
-// (either as home or away), regardless of who wins the match.
-// This uniform logic applies to all stages including the final.
-export function scoreKnockoutPick(predWinnerId, homeTeamId, awayTeamId, pointsClassify) {
-  if (predWinnerId === homeTeamId || predWinnerId === awayTeamId) return pointsClassify
-  return 0
+// Maps each knockout stage to the stage its winner advances into.
+// Used by setKnockoutResult to know which classification to score next.
+export const NEXT_STAGE = {
+  round_of_32:   'round_of_16',
+  round_of_16:   'quarter_final',
+  quarter_final: 'semi_final',
+  semi_final:    'final',
+  // 'final' has no next stage — champion is scored separately
 }

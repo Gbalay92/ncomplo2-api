@@ -1,6 +1,7 @@
 import pool from '../db/pool.js'
-import { scoreGroupMatch, scoreKnockoutSlot, scoreChampion } from '../services/scoring.service.js'
+import { scoreGroupMatch, scoreGroupQualification, scoreKnockoutAdvancement, scoreChampion } from '../services/scoring.service.js'
 import { getRealQualifiersMap } from '../services/tournament.service.js'
+import { NEXT_STAGE } from '../services/scoring.utils.js'
 
 /**
  * Factory that returns admin controller handlers bound to the given db pool and
@@ -11,7 +12,7 @@ import { getRealQualifiersMap } from '../services/tournament.service.js'
  */
 export function makeAdminController(
   db = pool,
-  scoring = { scoreGroupMatch, scoreKnockoutSlot, scoreChampion },
+  scoring = { scoreGroupMatch, scoreGroupQualification, scoreKnockoutAdvancement, scoreChampion },
   tournament = { getRealQualifiersMap }
 ) {
   return {
@@ -104,19 +105,11 @@ export function makeAdminController(
 
       const { stage } = rows[0]
 
-      // Score classification for the NEXT round: the teams just confirmed in the
-      // next slot are the ones being classified (e.g. R32 winner → now in R16 slot).
-      const { rows: nextSlots } = await db.query(`
-        SELECT ks_next.id AS slot_id
-        FROM knockout_slots ks_current
-        JOIN knockout_slots ks_next
-          ON ks_next.home_source = ks_current.slot_label
-          OR ks_next.away_source = ks_current.slot_label
-        WHERE ks_current.id = $1
-      `, [slot_id])
-
-      for (const { slot_id: nextSlotId } of nextSlots) {
-        await scoring.scoreKnockoutSlot(nextSlotId)
+      // Score advancement: if the winner advances to another stage, award
+      // points to users who had this team in their predicted bracket for this round.
+      const nextStage = NEXT_STAGE[stage]
+      if (nextStage && winner_id) {
+        await scoring.scoreKnockoutAdvancement(winner_id, nextStage)
       }
 
       // After the final: also score champion
@@ -205,10 +198,10 @@ export function makeAdminController(
 
       await db.query(`UPDATE tournament_settings SET group_stage_locked = true WHERE id = true`)
 
-      // Score R32 classification: 5 pts for each team correctly predicted among the 32
-      for (const slot of r32Slots) {
-        await scoring.scoreKnockoutSlot(slot.id)
-      }
+      // Score R32 classification: compare each user's predicted 32 qualifiers
+      // (from predicted_group_standings) against the actual 32 just seeded.
+      // 5 pts per correct team → max 32 × 5 = 160 pts.
+      await scoring.scoreGroupQualification()
 
       res.json({ message: 'Group stage locked. Round of 32 matchups seeded.', qualifiers })
     },
