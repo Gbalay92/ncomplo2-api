@@ -17,6 +17,7 @@ export function fakeDb(queryResponses = []) {
   const queue = [...queryResponses]
   const inserts = []
   const updates = []
+  const deletes = []
   let began = false
   let committed = false
   let rolledBack = false
@@ -26,7 +27,7 @@ export function fakeDb(queryResponses = []) {
     if (s.startsWith('BEGIN'))    { began = true;      return { rows: [] } }
     if (s.startsWith('COMMIT'))   { committed = true;  return { rows: [] } }
     if (s.startsWith('ROLLBACK')) { rolledBack = true; return { rows: [] } }
-    if (s.startsWith('DELETE'))   { return { rows: [] } }
+    if (s.startsWith('DELETE'))   { deletes.push(params); return { rows: [] } }
     if (s.startsWith('INSERT')) {
       inserts.push(params)
       return { rows: [] }
@@ -45,6 +46,7 @@ export function fakeDb(queryResponses = []) {
   const client = {
     inserts,
     updates,
+    deletes,
     query,
     release: () => {},
     get began()      { return began },
@@ -57,5 +59,6 @@ export function fakeDb(queryResponses = []) {
     query,   // pool-level direct queries (no transaction)
     inserts,
     updates,
+    deletes,
   }
 }
