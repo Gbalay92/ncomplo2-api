@@ -11,7 +11,8 @@ import { getRealQualifiersMap } from '../services/tournament.service.js'
  */
 export function makeAdminController(
   db = pool,
-  scoring = { scoreGroupMatch, scoreKnockoutSlot, scoreChampion }
+  scoring = { scoreGroupMatch, scoreKnockoutSlot, scoreChampion },
+  tournament = { getRealQualifiersMap }
 ) {
   return {
 
@@ -157,7 +158,7 @@ export function makeAdminController(
         })
       }
 
-      const qualifiers = await getRealQualifiersMap()
+      const qualifiers = await tournament.getRealQualifiersMap()
 
       const { rows: r32Slots } = await db.query(
         "SELECT id, slot_label, home_source, away_source FROM knockout_slots WHERE stage = 'round_of_32'"

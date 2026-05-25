@@ -1,10 +1,10 @@
 import pool from '../db/pool.js'
 
-const GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
+export const GROUPS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L']
 
 // Pure: given an array of { home_team_id, away_team_id, home_goals, away_goals }
 // returns standings sorted by pts → gd → gf
-function calculateGroupTable(matches) {
+export function calculateGroupTable(matches) {
   const stats = {}
 
   for (const { home_team_id, away_team_id } of matches) {
@@ -144,13 +144,14 @@ async function deriveRealGroupTable(groupName, client) {
 
 // Returns a position-label → team_id map for seeding the real knockout bracket
 // e.g. { '1A': uuid, '2A': uuid, '3rd_1': uuid, ... }
-export async function getRealQualifiersMap() {
-  const client = await pool.connect()
+// Accepts optional db and groups list for testing.
+export async function getRealQualifiersMap(db = pool, groups = GROUPS) {
+  const client = await db.connect()
   try {
     const map = {}
     const thirdPlaced = []
 
-    for (const group of GROUPS) {
+    for (const group of groups) {
       const table = await deriveRealGroupTable(group, client)
       table.forEach((entry, i) => {
         map[`${i + 1}${group}`] = entry.team_id
