@@ -1,10 +1,9 @@
 import pool from '../db/pool.js'
-import { scoreGroupPrediction } from './scoring.utils.js'
+import { scoreGroupPrediction, scoreKnockoutPick } from './scoring.utils.js'
 
 // Called after admin enters a group match result.
-// Deletes previous score_log entries for this match and reinserts recalculated ones.
-export async function scoreGroupMatch(matchId) {
-  const client = await pool.connect()
+export async function scoreGroupMatch(matchId, db = pool) {
+  const client = await db.connect()
   try {
     await client.query('BEGIN')
 
@@ -56,10 +55,8 @@ export async function scoreGroupMatch(matchId) {
 }
 
 // Called after each knockout result is saved.
-// Scores the single slot immediately — safe to call multiple times as results
-// are updated live. Uses slot_id as event_ref so each slot is independent.
-export async function scoreKnockoutSlot(slotId) {
-  const client = await pool.connect()
+export async function scoreKnockoutSlot(slotId, db = pool) {
+  const client = await db.connect()
   try {
     await client.query('BEGIN')
 
@@ -77,7 +74,6 @@ export async function scoreKnockoutSlot(slotId) {
       [slotId]
     )
 
-    // No winner yet (e.g. draw mid-match, penalties not decided) — nothing to score
     if (!real_winner_id) {
       await client.query('COMMIT')
       return
@@ -90,13 +86,6 @@ export async function scoreKnockoutSlot(slotId) {
     if (!rules.length) throw new Error(`No scoring rule for stage: ${stage}`)
     const { points_classify } = rules[0]
 
-    // Final: both finalists earn points_classify; other rounds: only the winner
-    const scoringTeams = new Set(
-      stage === 'final'
-        ? [home_team_id, away_team_id].filter(Boolean)
-        : [real_winner_id]
-    )
-
     const { rows: predictions } = await client.query(`
       SELECT user_id, pred_winner_id
       FROM predicted_bracket
@@ -104,11 +93,12 @@ export async function scoreKnockoutSlot(slotId) {
     `, [slotId])
 
     for (const { user_id, pred_winner_id } of predictions) {
-      if (scoringTeams.has(pred_winner_id)) {
+      const pts = scoreKnockoutPick(pred_winner_id, real_winner_id, home_team_id, away_team_id, stage, points_classify)
+      if (pts > 0) {
         await client.query(`
           INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
           VALUES ($1, 'classification', $2, $3, $4)
-        `, [user_id, slotId, stage, points_classify])
+        `, [user_id, slotId, stage, pts])
       }
     }
 
@@ -121,9 +111,9 @@ export async function scoreKnockoutSlot(slotId) {
   }
 }
 
-// Called after the final result is confirmed. Awards points_champion for the correct champion pick.
-export async function scoreChampion() {
-  const client = await pool.connect()
+// Called after the final result is confirmed.
+export async function scoreChampion(db = pool) {
+  const client = await db.connect()
   try {
     await client.query('BEGIN')
 
@@ -167,4 +157,3 @@ export async function scoreChampion() {
     client.release()
   }
 }
-
