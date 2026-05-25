@@ -17,20 +17,42 @@ export function makeAdminController(
 
     async setGroupMatchResult(req, res) {
       const { id } = req.params
-      const { home_goals, away_goals } = req.body
+      const { home_goals, away_goals, current_updated_at } = req.body
 
       if (home_goals == null || away_goals == null || home_goals < 0 || away_goals < 0) {
         return res.status(400).json({ error: 'home_goals and away_goals must be non-negative integers' })
       }
 
+      // Optimistic locking: if the client sends current_updated_at, only apply the
+      // update when the row hasn't changed since the client last read it.
+      const useLock = current_updated_at != null
       const { rows } = await db.query(
-        `UPDATE group_matches
-         SET real_home_goals = $1, real_away_goals = $2, is_locked = true, updated_at = now()
-         WHERE id = $3
-         RETURNING *`,
-        [home_goals, away_goals, id]
+        useLock
+          ? `UPDATE group_matches
+             SET real_home_goals = $1, real_away_goals = $2, is_locked = true, updated_at = now()
+             WHERE id = $3 AND updated_at = $4
+             RETURNING *`
+          : `UPDATE group_matches
+             SET real_home_goals = $1, real_away_goals = $2, is_locked = true, updated_at = now()
+             WHERE id = $3
+             RETURNING *`,
+        useLock ? [home_goals, away_goals, id, current_updated_at] : [home_goals, away_goals, id]
       )
-      if (!rows.length) return res.status(404).json({ error: 'Match not found' })
+
+      if (!rows.length) {
+        if (useLock) {
+          // Row exists but timestamp didn't match → concurrent modification
+          const { rows: exists } = await db.query(
+            'SELECT id FROM group_matches WHERE id = $1', [id]
+          )
+          if (exists.length) {
+            return res.status(409).json({
+              error: 'Match was modified by another admin. Please reload and try again.',
+            })
+          }
+        }
+        return res.status(404).json({ error: 'Match not found' })
+      }
 
       await scoring.scoreGroupMatch(id)
 
@@ -39,7 +61,7 @@ export function makeAdminController(
 
     async setKnockoutResult(req, res) {
       const { slot_id } = req.params
-      const { home_goals, away_goals, winner_id = null } = req.body
+      const { home_goals, away_goals, winner_id = null, current_updated_at } = req.body
 
       if (home_goals == null || away_goals == null || home_goals < 0 || away_goals < 0) {
         return res.status(400).json({ error: 'home_goals and away_goals must be non-negative integers' })
@@ -49,14 +71,35 @@ export function makeAdminController(
         return res.status(400).json({ error: 'winner_id is required when the match ends in a draw (penalties)' })
       }
 
+      const useLock = current_updated_at != null
       const { rows } = await db.query(
-        `UPDATE real_bracket
-         SET real_home_goals = $1, real_away_goals = $2, real_winner_id = $3, updated_at = now()
-         WHERE slot_id = $4
-         RETURNING *, (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`,
-        [home_goals, away_goals, winner_id, slot_id]
+        useLock
+          ? `UPDATE real_bracket
+             SET real_home_goals = $1, real_away_goals = $2, real_winner_id = $3, updated_at = now()
+             WHERE slot_id = $4 AND updated_at = $5
+             RETURNING *, (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`
+          : `UPDATE real_bracket
+             SET real_home_goals = $1, real_away_goals = $2, real_winner_id = $3, updated_at = now()
+             WHERE slot_id = $4
+             RETURNING *, (SELECT stage FROM knockout_slots WHERE id = slot_id) AS stage`,
+        useLock
+          ? [home_goals, away_goals, winner_id, slot_id, current_updated_at]
+          : [home_goals, away_goals, winner_id, slot_id]
       )
-      if (!rows.length) return res.status(404).json({ error: 'Bracket slot not found' })
+
+      if (!rows.length) {
+        if (useLock) {
+          const { rows: exists } = await db.query(
+            'SELECT slot_id FROM real_bracket WHERE slot_id = $1', [slot_id]
+          )
+          if (exists.length) {
+            return res.status(409).json({
+              error: 'Bracket slot was modified by another admin. Please reload and try again.',
+            })
+          }
+        }
+        return res.status(404).json({ error: 'Bracket slot not found' })
+      }
 
       const { stage } = rows[0]
 
