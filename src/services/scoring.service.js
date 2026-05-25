@@ -54,30 +54,37 @@ export async function scoreGroupMatch(matchId, db = pool) {
   }
 }
 
-// Called after each knockout result is saved.
+// Scores classification for a knockout slot — awards points to users who
+// predicted a team that IS in this slot (home or away).
+// Called:
+//   - by lockGroupStage for every R32 slot (teams just confirmed from groups)
+//   - by setKnockoutResult for the NEXT slot after each match result
+//     (e.g. after an R32 result → scores the R16 slot the winner feeds into)
 export async function scoreKnockoutSlot(slotId, db = pool) {
   const client = await db.connect()
   try {
     await client.query('BEGIN')
 
     const { rows: slotRows } = await client.query(`
-      SELECT ks.stage, rb.real_winner_id, rb.home_team_id, rb.away_team_id
+      SELECT ks.stage, rb.home_team_id, rb.away_team_id
       FROM knockout_slots ks
       JOIN real_bracket rb ON rb.slot_id = ks.id
       WHERE ks.id = $1
     `, [slotId])
     if (!slotRows.length) throw new Error('Slot not found')
-    const { stage, real_winner_id, home_team_id, away_team_id } = slotRows[0]
+    const { stage, home_team_id, away_team_id } = slotRows[0]
 
+    // Nothing to score if no teams have been confirmed for this slot yet
+    if (!home_team_id && !away_team_id) {
+      await client.query('COMMIT')
+      return
+    }
+
+    // Idempotent: delete previous classification entries for this slot
     await client.query(
       "DELETE FROM score_log WHERE event_type = 'classification' AND event_ref = $1",
       [slotId]
     )
-
-    if (!real_winner_id) {
-      await client.query('COMMIT')
-      return
-    }
 
     const { rows: rules } = await client.query(
       'SELECT points_classify FROM scoring_rules WHERE stage = $1',
@@ -93,7 +100,7 @@ export async function scoreKnockoutSlot(slotId, db = pool) {
     `, [slotId])
 
     for (const { user_id, pred_winner_id } of predictions) {
-      const pts = scoreKnockoutPick(pred_winner_id, real_winner_id, home_team_id, away_team_id, stage, points_classify)
+      const pts = scoreKnockoutPick(pred_winner_id, home_team_id, away_team_id, points_classify)
       if (pts > 0) {
         await client.query(`
           INSERT INTO score_log (user_id, event_type, event_ref, stage, points)

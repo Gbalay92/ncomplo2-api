@@ -2,7 +2,7 @@ import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { makeAdminController } from '../controllers/admin.controller.js'
 import { fakeDb } from './helpers/fakeDb.js'
-import { fakeReq, fakeRes } from './helpers/fakeHttp.js'
+import { fakeReq, fakeRes, fakeScoringFns } from './helpers/fakeHttp.js'
 
 // Mock del servicio de clasificados — devuelve un mapa configurable
 function fakeQualifiers(map = {}) {
@@ -53,7 +53,8 @@ describe('lockGroupStage', () => {
       { rows: [] },
     ])
 
-    const { lockGroupStage } = makeAdminController(db, {}, fakeQualifiers(qualMap))
+    const { scoring } = fakeScoringFns()
+    const { lockGroupStage } = makeAdminController(db, scoring, fakeQualifiers(qualMap))
     const res = fakeRes()
     await lockGroupStage(fakeReq(), res)
 
@@ -74,7 +75,8 @@ describe('lockGroupStage', () => {
       { rows: [] }, // UPDATE tournament_settings
     ])
 
-    const { lockGroupStage } = makeAdminController(db, {}, fakeQualifiers(qualMap))
+    const { scoring } = fakeScoringFns()
+    const { lockGroupStage } = makeAdminController(db, scoring, fakeQualifiers(qualMap))
     const res = fakeRes()
     await lockGroupStage(fakeReq(), res)
 
@@ -99,7 +101,8 @@ describe('lockGroupStage', () => {
       { rows: [] },
     ])
 
-    const { lockGroupStage } = makeAdminController(db, {}, fakeQualifiers(qualMap))
+    const { scoring } = fakeScoringFns()
+    const { lockGroupStage } = makeAdminController(db, scoring, fakeQualifiers(qualMap))
     const res = fakeRes()
     await lockGroupStage(fakeReq(), res)
 
@@ -125,7 +128,8 @@ describe('lockGroupStage', () => {
       { rows: [] },
     ])
 
-    const { lockGroupStage } = makeAdminController(db, {}, fakeQualifiers(qualMap))
+    const { scoring } = fakeScoringFns()
+    const { lockGroupStage } = makeAdminController(db, scoring, fakeQualifiers(qualMap))
     const res = fakeRes()
     await lockGroupStage(fakeReq(), res)
 
@@ -135,5 +139,30 @@ describe('lockGroupStage', () => {
     assert.equal(db.inserts[2][0], 's3')
     assert.equal(db.inserts[2][1], null) // 1E no está en el mapa
     assert.equal(db.inserts[2][2], null) // 2F tampoco
+  })
+
+  test('tras sembrar R32, llama a scoreKnockoutSlot para cada slot', async () => {
+    const qualMap = { '1A': 'ta1', '2B': 'tb2', '1C': 'tc1', '2D': 'td2' }
+
+    const db = fakeDb([
+      { rows: [{ count: '0' }] },
+      { rows: [
+        { id: 'slot-r32-1', home_source: '1A', away_source: '2B' },
+        { id: 'slot-r32-2', home_source: '1C', away_source: '2D' },
+      ]},
+      { rows: [] }, // UPDATE tournament_settings
+    ])
+
+    const { scoring, calls } = fakeScoringFns()
+    const { lockGroupStage } = makeAdminController(db, scoring, fakeQualifiers(qualMap))
+    const res = fakeRes()
+    await lockGroupStage(fakeReq(), res)
+
+    assert.equal(res._status, 200)
+    assert.equal(calls.length, 2)
+    assert.equal(calls[0].fn, 'scoreKnockoutSlot')
+    assert.equal(calls[0].args[0], 'slot-r32-1')
+    assert.equal(calls[1].fn, 'scoreKnockoutSlot')
+    assert.equal(calls[1].args[0], 'slot-r32-2')
   })
 })

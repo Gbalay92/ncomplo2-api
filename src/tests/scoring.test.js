@@ -41,33 +41,33 @@ describe('scoreGroupPrediction', () => {
 })
 
 // ─── scoreKnockoutPick ────────────────────────────────────────────────────────
+// Lógica uniforme para todas las rondas: puntúa si el equipo predicho
+// está en el slot (como local O visitante), independientemente del ganador.
 
 const TEAM_A = 'team-a'
 const TEAM_B = 'team-b'
 const TEAM_C = 'team-c'
 
-describe('scoreKnockoutPick — rondas normales', () => {
-  test('acierta el clasificado → points_classify', () =>
-    assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_A, TEAM_B, 'round_of_32', 5), 5))
+describe('scoreKnockoutPick', () => {
+  test('predice el equipo local → points_classify',    () =>
+    assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 5), 5))
 
-  test('falla el clasificado → 0',                () =>
-    assert.equal(scoreKnockoutPick(TEAM_B, TEAM_A, TEAM_A, TEAM_B, 'round_of_32', 5), 0))
+  test('predice el equipo visitante → points_classify', () =>
+    assert.equal(scoreKnockoutPick(TEAM_B, TEAM_A, TEAM_B, 10), 10))
 
-  test('pick de equipo distinto → 0',             () =>
-    assert.equal(scoreKnockoutPick(TEAM_C, TEAM_A, TEAM_A, TEAM_B, 'round_of_16', 10), 0))
+  test('predice equipo fuera del slot → 0',             () =>
+    assert.equal(scoreKnockoutPick(TEAM_C, TEAM_A, TEAM_B, 5), 0))
 
-  test('R16 acierta → 10 pts',  () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_A, TEAM_B, 'round_of_16',   10), 10))
-  test('QF acierta → 15 pts',   () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_A, TEAM_B, 'quarter_final', 15), 15))
-  test('SF acierta → 25 pts',   () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_A, TEAM_B, 'semi_final',    25), 25))
-})
+  test('solo home confirmado (away null) — predice home → points_classify', () =>
+    assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, null, 5), 5))
 
-describe('scoreKnockoutPick — final (ambos finalistas puntúan)', () => {
-  test('predice al ganador → 35 pts',        () =>
-    assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_A, TEAM_B, 'final', 35), 35))
+  test('solo home confirmado (away null) — predice otro → 0',               () =>
+    assert.equal(scoreKnockoutPick(TEAM_C, TEAM_A, null, 5), 0))
 
-  test('predice al perdedor (también finalista) → 35 pts', () =>
-    assert.equal(scoreKnockoutPick(TEAM_B, TEAM_A, TEAM_A, TEAM_B, 'final', 35), 35))
-
-  test('predice equipo que no llegó a la final → 0', () =>
-    assert.equal(scoreKnockoutPick(TEAM_C, TEAM_A, TEAM_A, TEAM_B, 'final', 35), 0))
+  test('R32:   5 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B,  5),  5))
+  test('R16:  10 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 10), 10))
+  test('QF:   15 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 15), 15))
+  test('SF:   25 pts', () => assert.equal(scoreKnockoutPick(TEAM_A, TEAM_A, TEAM_B, 25), 25))
+  test('Final: 35 pts (cualquier finalista)', () =>
+    assert.equal(scoreKnockoutPick(TEAM_B, TEAM_A, TEAM_B, 35), 35))
 })

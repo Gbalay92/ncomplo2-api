@@ -104,7 +104,22 @@ export function makeAdminController(
 
       const { stage } = rows[0]
 
-      await scoring.scoreKnockoutSlot(slot_id)
+      // Score classification for the NEXT round: the teams just confirmed in the
+      // next slot are the ones being classified (e.g. R32 winner → now in R16 slot).
+      const { rows: nextSlots } = await db.query(`
+        SELECT ks_next.id AS slot_id
+        FROM knockout_slots ks_current
+        JOIN knockout_slots ks_next
+          ON ks_next.home_source = ks_current.slot_label
+          OR ks_next.away_source = ks_current.slot_label
+        WHERE ks_current.id = $1
+      `, [slot_id])
+
+      for (const { slot_id: nextSlotId } of nextSlots) {
+        await scoring.scoreKnockoutSlot(nextSlotId)
+      }
+
+      // After the final: also score champion
       if (stage === 'final' && winner_id) {
         await scoring.scoreChampion()
       }
@@ -189,6 +204,11 @@ export function makeAdminController(
       }
 
       await db.query(`UPDATE tournament_settings SET group_stage_locked = true WHERE id = true`)
+
+      // Score R32 classification: 5 pts for each team correctly predicted among the 32
+      for (const slot of r32Slots) {
+        await scoring.scoreKnockoutSlot(slot.id)
+      }
 
       res.json({ message: 'Group stage locked. Round of 32 matchups seeded.', qualifiers })
     },
