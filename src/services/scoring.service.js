@@ -1,16 +1,5 @@
 import pool from '../db/pool.js'
-
-function getOutcome(home, away) {
-  if (home > away) return 'home'
-  if (away > home) return 'away'
-  return 'draw'
-}
-
-function scoreGroupPrediction(predHome, predAway, realHome, realAway, pointsSign, pointsExact) {
-  if (predHome === realHome && predAway === realAway) return pointsSign + pointsExact
-  if (getOutcome(predHome, predAway) === getOutcome(realHome, realAway)) return pointsSign
-  return 0
-}
+import { scoreGroupPrediction } from './scoring.utils.js'
 
 // Called after admin enters a group match result.
 // Deletes previous score_log entries for this match and reinserts recalculated ones.
