@@ -2,6 +2,7 @@ import pool from '../db/pool.js'
 import { scoreGroupMatch, scoreGroupQualification, scoreKnockoutAdvancement, scoreChampion } from '../services/scoring.service.js'
 import { getRealQualifiersMap } from '../services/tournament.service.js'
 import { NEXT_STAGE } from '../services/scoring.utils.js'
+import { scheduleKickoffs } from '../jobs/autoKickoff.js'
 
 /**
  * Factory that returns admin controller handlers bound to the given db pool and
@@ -108,19 +109,21 @@ export function makeAdminController(
         return res.status(404).json({ error: 'Bracket slot not found' })
       }
 
-      const { stage, prev_winner_id } = rows[0]
+      // Use the DB-stored real_winner_id: for non-draws the trigger derives it from goals,
+      // so winner_id from req.body is null but real_winner_id is already set in the row.
+      const { stage, prev_winner_id, real_winner_id: effectiveWinnerId } = rows[0]
       const nextStage = NEXT_STAGE[stage]
 
       // Score advancement — handles all live-update cases:
       //   winner unchanged  → idempotent (delete + re-insert same team)
       //   winner changed    → deletes prev team entries, inserts new team
       //   winner now null   → deletes prev team entries, nothing inserted
-      if (nextStage && (winner_id || prev_winner_id)) {
-        await scoring.scoreKnockoutAdvancement(winner_id, nextStage, prev_winner_id)
+      if (nextStage && (effectiveWinnerId || prev_winner_id)) {
+        await scoring.scoreKnockoutAdvancement(effectiveWinnerId, nextStage, prev_winner_id)
       }
 
       // After the final: also score champion
-      if (stage === 'final' && winner_id) {
+      if (stage === 'final' && effectiveWinnerId) {
         await scoring.scoreChampion()
       }
 
@@ -178,11 +181,15 @@ export function makeAdminController(
       const { rows: r32Slots } = await db.query(
         "SELECT id, slot_label, home_source, away_source FROM knockout_slots WHERE stage = 'round_of_32'"
       )
+      const { rows: laterSlots } = await db.query(
+        "SELECT id FROM knockout_slots WHERE stage <> 'round_of_32'"
+      )
 
       const client = await db.connect()
       try {
         await client.query('BEGIN')
 
+        // Seed R32 with the actual qualified teams
         for (const slot of r32Slots) {
           const homeId = qualifiers[slot.home_source] ?? null
           const awayId = qualifiers[slot.away_source] ?? null
@@ -193,6 +200,14 @@ export function makeAdminController(
             ON CONFLICT (slot_id)
             DO UPDATE SET home_team_id = $2, away_team_id = $3, updated_at = now()
           `, [slot.id, homeId, awayId])
+        }
+
+        // Pre-insert empty rows for R16-Final so the trigger can UPDATE them when propagating winners
+        for (const slot of laterSlots) {
+          await client.query(`
+            INSERT INTO real_bracket (slot_id) VALUES ($1)
+            ON CONFLICT (slot_id) DO NOTHING
+          `, [slot.id])
         }
 
         await client.query('COMMIT')
@@ -209,6 +224,9 @@ export function makeAdminController(
       // (from predicted_group_standings) against the actual 32 just seeded.
       // 5 pts per correct team → max 32 × 5 = 160 pts.
       await scoring.scoreGroupQualification()
+
+      // Re-schedule kickoffs so newly seeded R32 slots are included
+      scheduleKickoffs().catch(err => console.error('[autoKickoff] post-lock error:', err.message))
 
       res.json({ message: 'Group stage locked. Round of 32 matchups seeded.', qualifiers })
     },
