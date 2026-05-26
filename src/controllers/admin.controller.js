@@ -2,7 +2,6 @@ import pool from '../db/pool.js'
 import { scoreGroupMatch, scoreGroupQualification, scoreKnockoutAdvancement, scoreChampion } from '../services/scoring.service.js'
 import { getRealQualifiersMap } from '../services/tournament.service.js'
 import { NEXT_STAGE } from '../services/scoring.utils.js'
-import { scheduleKickoffs } from '../jobs/autoKickoff.js'
 
 /**
  * Factory that returns admin controller handlers bound to the given db pool and
@@ -224,9 +223,6 @@ export function makeAdminController(
       // (from predicted_group_standings) against the actual 32 just seeded.
       // 5 pts per correct team → max 32 × 5 = 160 pts.
       await scoring.scoreGroupQualification()
-
-      // Re-schedule kickoffs so newly seeded R32 slots are included
-      scheduleKickoffs().catch(err => console.error('[autoKickoff] post-lock error:', err.message))
 
       res.json({ message: 'Group stage locked. Round of 32 matchups seeded.', qualifiers })
     },
