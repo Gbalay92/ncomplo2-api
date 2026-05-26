@@ -420,15 +420,21 @@ BEGIN
         PERFORM invalidate_bracket_cascade(v_slot_label, 'away');
     END IF;
 
-    UPDATE real_bracket rb
-    SET home_team_id = v_winner_id, updated_at = now()
+    -- Upsert: create the next-stage row if it doesn't exist yet, or update it if it does.
+    -- Plain UPDATE would silently do nothing when the downstream row is missing.
+    INSERT INTO real_bracket (slot_id, home_team_id)
+    SELECT ks.id, v_winner_id
     FROM knockout_slots ks
-    WHERE rb.slot_id = ks.id AND ks.home_source = v_slot_label;
+    WHERE ks.home_source = v_slot_label
+    ON CONFLICT (slot_id) DO UPDATE
+        SET home_team_id = v_winner_id, updated_at = now();
 
-    UPDATE real_bracket rb
-    SET away_team_id = v_winner_id, updated_at = now()
+    INSERT INTO real_bracket (slot_id, away_team_id)
+    SELECT ks.id, v_winner_id
     FROM knockout_slots ks
-    WHERE rb.slot_id = ks.id AND ks.away_source = v_slot_label;
+    WHERE ks.away_source = v_slot_label
+    ON CONFLICT (slot_id) DO UPDATE
+        SET away_team_id = v_winner_id, updated_at = now();
 
     RETURN NEW;
 END;

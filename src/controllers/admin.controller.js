@@ -178,11 +178,15 @@ export function makeAdminController(
       const { rows: r32Slots } = await db.query(
         "SELECT id, slot_label, home_source, away_source FROM knockout_slots WHERE stage = 'round_of_32'"
       )
+      const { rows: laterSlots } = await db.query(
+        "SELECT id FROM knockout_slots WHERE stage <> 'round_of_32'"
+      )
 
       const client = await db.connect()
       try {
         await client.query('BEGIN')
 
+        // Seed R32 with the actual qualified teams
         for (const slot of r32Slots) {
           const homeId = qualifiers[slot.home_source] ?? null
           const awayId = qualifiers[slot.away_source] ?? null
@@ -193,6 +197,16 @@ export function makeAdminController(
             ON CONFLICT (slot_id)
             DO UPDATE SET home_team_id = $2, away_team_id = $3, updated_at = now()
           `, [slot.id, homeId, awayId])
+        }
+
+        // Pre-insert empty rows for R16-Final so the auto_fill trigger can UPDATE them
+        // (trigger propagates winners via UPDATE; if row is missing it does nothing)
+        for (const slot of laterSlots) {
+          await client.query(`
+            INSERT INTO real_bracket (slot_id)
+            VALUES ($1)
+            ON CONFLICT (slot_id) DO NOTHING
+          `, [slot.id])
         }
 
         await client.query('COMMIT')
