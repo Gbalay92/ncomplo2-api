@@ -64,10 +64,15 @@ export async function getUserBracket(req, res) {
     SELECT ks.id AS slot_id, ks.slot_label, ks.stage, ks.match_number,
            ks.home_source, ks.away_source,
            pb.pred_winner_id,
-           t.name AS pred_winner_name, t.flag_url AS pred_winner_flag
+           wt.name  AS pred_winner_name,  wt.flag_url  AS pred_winner_flag,
+           ht.id    AS home_team_id,      ht.name      AS home_team_name,  ht.flag_url AS home_team_flag,
+           at.id    AS away_team_id,      at.name      AS away_team_name,  at.flag_url AS away_team_flag
     FROM knockout_slots ks
     LEFT JOIN predicted_bracket pb ON pb.slot_id = ks.id AND pb.user_id = $1
-    LEFT JOIN teams t ON t.id = pb.pred_winner_id
+    LEFT JOIN teams wt ON wt.id = pb.pred_winner_id
+    LEFT JOIN real_bracket rb ON rb.slot_id = ks.id
+    LEFT JOIN teams ht ON ht.id = rb.home_team_id
+    LEFT JOIN teams at ON at.id = rb.away_team_id
     ORDER BY ks.stage, ks.match_number
   `, [userId])
   res.json(rows)
