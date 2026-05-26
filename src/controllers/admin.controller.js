@@ -108,19 +108,22 @@ export function makeAdminController(
         return res.status(404).json({ error: 'Bracket slot not found' })
       }
 
-      const { stage, prev_winner_id } = rows[0]
+      const { stage, prev_winner_id, real_winner_id: effective_winner_id } = rows[0]
       const nextStage = NEXT_STAGE[stage]
 
+      // Use the DB-stored real_winner_id (which may have been derived by the trigger
+      // from goals for non-draw matches) rather than winner_id from the request body
+      // (which is null for non-draws sent by the admin UI).
       // Score advancement — handles all live-update cases:
       //   winner unchanged  → idempotent (delete + re-insert same team)
       //   winner changed    → deletes prev team entries, inserts new team
       //   winner now null   → deletes prev team entries, nothing inserted
-      if (nextStage && (winner_id || prev_winner_id)) {
-        await scoring.scoreKnockoutAdvancement(winner_id, nextStage, prev_winner_id)
+      if (nextStage && (effective_winner_id || prev_winner_id)) {
+        await scoring.scoreKnockoutAdvancement(effective_winner_id, nextStage, prev_winner_id)
       }
 
       // After the final: also score champion
-      if (stage === 'final' && winner_id) {
+      if (stage === 'final' && effective_winner_id) {
         await scoring.scoreChampion()
       }
 
