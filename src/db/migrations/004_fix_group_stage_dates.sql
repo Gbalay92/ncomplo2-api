@@ -33,7 +33,7 @@ UPDATE group_matches SET match_date = '2026-06-24 22:00:00+00' WHERE match_numbe
 UPDATE group_matches SET match_date = '2026-06-13 01:00:00+00' WHERE match_number = 19; -- Jun 12 21:00 EDT
 UPDATE group_matches SET match_date = '2026-06-14 04:00:00+00' WHERE match_number = 20; -- Jun 13 00:00 EDT (midnight → Jun 14)
 UPDATE group_matches SET match_date = '2026-06-19 19:00:00+00' WHERE match_number = 21; -- Jun 19 15:00 EDT
-UPDATE group_matches SET match_date = '2026-06-20 04:00:00+00' WHERE match_number = 22; -- Jun 19 00:00 EDT (midnight → Jun 20)
+UPDATE group_matches SET match_date = '2026-06-20 03:00:00+00' WHERE match_number = 22; -- Jun 19 23:00 EDT
 UPDATE group_matches SET match_date = '2026-06-26 02:00:00+00' WHERE match_number = 23; -- Jun 25 22:00 EDT
 UPDATE group_matches SET match_date = '2026-06-26 02:00:00+00' WHERE match_number = 24; -- Jun 25 22:00 EDT
 
@@ -41,7 +41,7 @@ UPDATE group_matches SET match_date = '2026-06-26 02:00:00+00' WHERE match_numbe
 -- Match 25: GER vs CUW  Jun 14 13:00 EDT = 17:00 UTC  ✓
 UPDATE group_matches SET match_date = '2026-06-14 23:00:00+00' WHERE match_number = 26; -- Jun 14 19:00 EDT
 UPDATE group_matches SET match_date = '2026-06-20 20:00:00+00' WHERE match_number = 27; -- Jun 20 16:00 EDT
-UPDATE group_matches SET match_date = '2026-06-21 02:00:00+00' WHERE match_number = 28; -- Jun 20 22:00 EDT
+UPDATE group_matches SET match_date = '2026-06-21 00:00:00+00' WHERE match_number = 28; -- Jun 20 20:00 EDT
 UPDATE group_matches SET match_date = '2026-06-25 20:00:00+00' WHERE match_number = 29; -- Jun 25 16:00 EDT
 UPDATE group_matches SET match_date = '2026-06-25 20:00:00+00' WHERE match_number = 30; -- Jun 25 16:00 EDT
 

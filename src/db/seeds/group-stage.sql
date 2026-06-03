@@ -91,7 +91,7 @@ INSERT INTO group_matches (match_number, group_name, home_team_id, away_team_id,
   (19, 'D', (SELECT id FROM teams WHERE code='USA'), (SELECT id FROM teams WHERE code='PAR'), '2026-06-13 01:00:00+00'),
   (20, 'D', (SELECT id FROM teams WHERE code='AUS'), (SELECT id FROM teams WHERE code='TUR'), '2026-06-14 04:00:00+00'),
   (21, 'D', (SELECT id FROM teams WHERE code='USA'), (SELECT id FROM teams WHERE code='AUS'), '2026-06-19 19:00:00+00'),
-  (22, 'D', (SELECT id FROM teams WHERE code='PAR'), (SELECT id FROM teams WHERE code='TUR'), '2026-06-20 04:00:00+00'),
+  (22, 'D', (SELECT id FROM teams WHERE code='PAR'), (SELECT id FROM teams WHERE code='TUR'), '2026-06-20 03:00:00+00'),
   (23, 'D', (SELECT id FROM teams WHERE code='USA'), (SELECT id FROM teams WHERE code='TUR'), '2026-06-26 02:00:00+00'),
   (24, 'D', (SELECT id FROM teams WHERE code='PAR'), (SELECT id FROM teams WHERE code='AUS'), '2026-06-26 02:00:00+00');
 
@@ -100,7 +100,7 @@ INSERT INTO group_matches (match_number, group_name, home_team_id, away_team_id,
   (25, 'E', (SELECT id FROM teams WHERE code='GER'), (SELECT id FROM teams WHERE code='CUW'), '2026-06-14 17:00:00+00'),
   (26, 'E', (SELECT id FROM teams WHERE code='CIV'), (SELECT id FROM teams WHERE code='ECU'), '2026-06-14 23:00:00+00'),
   (27, 'E', (SELECT id FROM teams WHERE code='GER'), (SELECT id FROM teams WHERE code='CIV'), '2026-06-20 20:00:00+00'),
-  (28, 'E', (SELECT id FROM teams WHERE code='CUW'), (SELECT id FROM teams WHERE code='ECU'), '2026-06-21 02:00:00+00'),
+  (28, 'E', (SELECT id FROM teams WHERE code='CUW'), (SELECT id FROM teams WHERE code='ECU'), '2026-06-21 00:00:00+00'),
   (29, 'E', (SELECT id FROM teams WHERE code='GER'), (SELECT id FROM teams WHERE code='ECU'), '2026-06-25 20:00:00+00'),
   (30, 'E', (SELECT id FROM teams WHERE code='CUW'), (SELECT id FROM teams WHERE code='CIV'), '2026-06-25 20:00:00+00');
 
