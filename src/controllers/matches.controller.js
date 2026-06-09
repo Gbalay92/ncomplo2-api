@@ -46,7 +46,7 @@ export async function getMatches(req, res) {
 export async function getTodayMatches(req, res) {
   const allMatchesQuery = `
     SELECT
-      m.id, m.match_number, m.group_name, m.match_date,
+      m.id, m.match_number, m.group_name::TEXT AS group_name, m.match_date,
       m.real_home_goals, m.real_away_goals,
       ht.name AS home_team, ht.flag_url AS home_flag,
       at.name AS away_team, at.flag_url AS away_flag
@@ -55,7 +55,7 @@ export async function getTodayMatches(req, res) {
     JOIN teams at ON at.id = m.away_team_id
     UNION ALL
     SELECT
-      ks.id, ks.match_number, ks.stage AS group_name, ks.match_date,
+      ks.id, ks.match_number, ks.stage::TEXT AS group_name, ks.match_date,
       rb.real_home_goals, rb.real_away_goals,
       ht.name AS home_team, ht.flag_url AS home_flag,
       at.name AS away_team, at.flag_url AS away_flag
