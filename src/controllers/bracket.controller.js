@@ -39,12 +39,17 @@ export async function saveMyBracket(req, res) {
 
     await client.query('DELETE FROM predicted_bracket WHERE user_id = $1', [req.user.sub])
 
+    // Deduplicate picks by slot_id (last write wins) to avoid duplicate key on repeated slots
+    const uniquePicks = Object.values(
+      picks.reduce((acc, p) => { if (p.slot_id && p.pred_winner_id) acc[p.slot_id] = p; return acc; }, {})
+    )
+
     const results = []
-    for (const { slot_id, pred_winner_id } of picks) {
-      if (!slot_id || !pred_winner_id) continue
+    for (const { slot_id, pred_winner_id } of uniquePicks) {
       const { rows } = await client.query(`
         INSERT INTO predicted_bracket (user_id, slot_id, pred_winner_id)
         VALUES ($1, $2, $3)
+        ON CONFLICT (user_id, slot_id) DO UPDATE SET pred_winner_id = EXCLUDED.pred_winner_id, updated_at = now()
         RETURNING slot_id, pred_winner_id
       `, [req.user.sub, slot_id, pred_winner_id])
       results.push(rows[0])
