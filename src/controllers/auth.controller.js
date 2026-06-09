@@ -17,7 +17,7 @@ function setTokenCookies(res, accessToken, refreshToken) {
   const prod = process.env.NODE_ENV === 'production'
   const base = { httpOnly: true, sameSite: prod ? 'none' : 'strict', secure: prod }
   res.cookie('access_token', accessToken, { ...base, maxAge: 15 * 60 * 1000 })
-  res.cookie('refresh_token', refreshToken, { ...base, maxAge: REFRESH_TTL_MS, path: '/auth/refresh' })
+  res.cookie('refresh_token', refreshToken, { ...base, maxAge: REFRESH_TTL_MS, path: '/' })
 }
 
 async function saveRefreshToken(userId, refreshToken) {
@@ -90,7 +90,7 @@ export async function logout(req, res) {
     await pool.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hash])
   }
   res.clearCookie('access_token')
-  res.clearCookie('refresh_token', { path: '/auth/refresh' })
+  res.clearCookie('refresh_token', { path: '/' })
   res.json({ message: 'Logged out' })
 }
 
