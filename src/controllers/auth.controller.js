@@ -13,13 +13,6 @@ function issueTokens(user) {
   return { accessToken, refreshToken }
 }
 
-function setTokenCookies(res, accessToken, refreshToken) {
-  const prod = process.env.NODE_ENV === 'production'
-  const base = { httpOnly: true, sameSite: prod ? 'none' : 'strict', secure: prod }
-  res.cookie('access_token', accessToken, { ...base, maxAge: 15 * 60 * 1000 })
-  res.cookie('refresh_token', refreshToken, { ...base, maxAge: REFRESH_TTL_MS, path: '/' })
-}
-
 async function saveRefreshToken(userId, refreshToken) {
   const hash = crypto.createHash('sha256').update(refreshToken).digest('hex')
   const expiresAt = new Date(Date.now() + REFRESH_TTL_MS)
@@ -58,9 +51,8 @@ export async function register(req, res) {
 
   const { accessToken, refreshToken } = issueTokens(user)
   await saveRefreshToken(user.id, refreshToken)
-  setTokenCookies(res, accessToken, refreshToken)
 
-  res.status(201).json({ user: formatUser(user) })
+  res.status(201).json({ user: formatUser(user), access_token: accessToken, refresh_token: refreshToken })
 }
 
 export async function login(req, res) {
@@ -78,24 +70,21 @@ export async function login(req, res) {
 
   const { accessToken, refreshToken } = issueTokens(user)
   await saveRefreshToken(user.id, refreshToken)
-  setTokenCookies(res, accessToken, refreshToken)
 
-  res.json({ user: formatUser(user) })
+  res.json({ user: formatUser(user), access_token: accessToken, refresh_token: refreshToken })
 }
 
 export async function logout(req, res) {
-  const token = req.cookies?.refresh_token
+  const token = req.body?.refresh_token
   if (token) {
     const hash = crypto.createHash('sha256').update(token).digest('hex')
     await pool.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hash])
   }
-  res.clearCookie('access_token')
-  res.clearCookie('refresh_token', { path: '/' })
   res.json({ message: 'Logged out' })
 }
 
 export async function refresh(req, res) {
-  const token = req.cookies?.refresh_token
+  const token = req.body?.refresh_token
   if (!token) return res.status(401).json({ error: 'No refresh token' })
 
   const hash = crypto.createHash('sha256').update(token).digest('hex')
@@ -113,9 +102,8 @@ export async function refresh(req, res) {
   await pool.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hash])
   const { accessToken, refreshToken: newRefresh } = issueTokens(user)
   await saveRefreshToken(user.id, newRefresh)
-  setTokenCookies(res, accessToken, newRefresh)
 
-  res.json({ user: formatUser(user) })
+  res.json({ access_token: accessToken, refresh_token: newRefresh })
 }
 
 export async function me(req, res) {
