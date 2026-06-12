@@ -72,3 +72,14 @@ export async function getUserBracket(req, res) {
   `, [userId])
   res.json(rows)
 }
+
+
+export async function getUserProfile(req, res) {
+  const { userId } = req.params
+  const { rows } = await pool.query(
+    'SELECT display_name, first_name, last_name FROM users WHERE id = $1',
+    [userId]
+  )
+  if (!rows[0]) return res.status(404).json({ error: 'User not found' })
+  res.json(rows[0])
+}
