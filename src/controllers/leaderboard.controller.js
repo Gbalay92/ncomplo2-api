@@ -6,6 +6,7 @@ export async function getLeaderboard(req, res) {
            u.first_name, u.last_name
     FROM leaderboard l
     JOIN users u ON u.id = l.user_id
+    ORDER BY rank
     LIMIT 100
   `)
   res.json(rows)
