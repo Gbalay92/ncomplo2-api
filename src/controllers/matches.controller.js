@@ -65,11 +65,11 @@ export async function getTodayMatches(req, res) {
     LEFT JOIN teams at ON at.id = rb.away_team_id
   `
 
-  const { rows: today } = await pool.query(`
-    SELECT * FROM (${allMatchesQuery}) matches
-    WHERE DATE(match_date AT TIME ZONE 'UTC') = CURRENT_DATE
-    ORDER BY match_date
-  `)
+  const { from, to } = req.query
+  const todayQuery = from && to
+    ? `SELECT * FROM (${allMatchesQuery}) matches WHERE match_date >= $1 AND match_date < $2 ORDER BY match_date`
+    : `SELECT * FROM (${allMatchesQuery}) matches WHERE DATE(match_date AT TIME ZONE 'UTC') = CURRENT_DATE ORDER BY match_date`
+  const { rows: today } = await pool.query(todayQuery, from && to ? [from, to] : [])
 
   if (today.length) return res.json({ matches: today, isToday: true })
 
