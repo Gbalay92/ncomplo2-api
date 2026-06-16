@@ -27,11 +27,11 @@ export async function getUserTodayPredictions(req, res) {
   if (!await assertLocked(res)) return
   const { userId } = req.params
 
-  const { rows: today } = await pool.query(`
-    SELECT ${matchFields} ${matchJoins}
-    WHERE DATE(m.match_date AT TIME ZONE 'UTC') = CURRENT_DATE
-    ORDER BY m.match_date
-  `, [userId])
+  const { from, to } = req.query
+  const todayQuery = from && to
+    ? `SELECT ${matchFields} ${matchJoins} WHERE m.match_date >= $2 AND m.match_date < $3 ORDER BY m.match_date`
+    : `SELECT ${matchFields} ${matchJoins} WHERE DATE(m.match_date AT TIME ZONE 'UTC') = CURRENT_DATE ORDER BY m.match_date`
+  const { rows: today } = await pool.query(todayQuery, from && to ? [userId, from, to] : [userId])
 
   if (today.length) return res.json(today)
 
