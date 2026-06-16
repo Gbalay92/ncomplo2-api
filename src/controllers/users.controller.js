@@ -1,4 +1,5 @@
 import pool from '../db/pool.js'
+import { getUserQualifiers } from '../services/tournament.service.js'
 
 async function assertLocked(res) {
   const { rows } = await pool.query('SELECT predictions_locked FROM tournament_settings WHERE id = true')
@@ -54,6 +55,13 @@ export async function getUserPredictions(req, res) {
     ORDER BY m.group_name, m.match_number
   `, [userId])
   res.json(rows)
+}
+
+export async function getUserQualifiersHandler(req, res) {
+  if (!await assertLocked(res)) return
+  const { userId } = req.params
+  const qualifiers = await getUserQualifiers(userId)
+  res.json(qualifiers)
 }
 
 export async function getUserBracket(req, res) {
