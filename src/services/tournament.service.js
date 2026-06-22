@@ -533,7 +533,7 @@ const THIRD_SLOT_KEYS = [
 ]
 
 // Pure: given an array of { home_team_id, away_team_id, home_goals, away_goals }
-// returns standings sorted by pts → gd → gf
+// returns standings sorted by FIFA rules: pts → h2h pts → h2h gd → h2h gf → overall gd → overall gf
 export function calculateGroupTable(matches) {
   const stats = {}
 
@@ -553,7 +553,47 @@ export function calculateGroupTable(matches) {
     else { stats[home_team_id].pts += 1; stats[away_team_id].pts += 1 }
   }
 
-  return Object.values(stats).sort((a, b) => b.pts - a.pts || b.gd - a.gd || b.gf - a.gf)
+  const teams = Object.values(stats)
+
+  // Sort by overall pts first, then apply head-to-head within each tied group
+  teams.sort((a, b) => b.pts - a.pts)
+
+  let i = 0
+  while (i < teams.length) {
+    let j = i + 1
+    while (j < teams.length && teams[j].pts === teams[i].pts) j++
+
+    if (j - i > 1) {
+      const tiedTeams = teams.slice(i, j)
+      const tiedIds = new Set(tiedTeams.map(t => t.team_id))
+
+      const h2h = {}
+      for (const t of tiedTeams) h2h[t.team_id] = { pts: 0, gd: 0, gf: 0 }
+
+      for (const { home_team_id, away_team_id, home_goals, away_goals } of matches) {
+        if (!tiedIds.has(home_team_id) || !tiedIds.has(away_team_id)) continue
+        if (home_goals == null || away_goals == null) continue
+        h2h[home_team_id].gf += home_goals
+        h2h[home_team_id].gd += home_goals - away_goals
+        h2h[away_team_id].gf += away_goals
+        h2h[away_team_id].gd += away_goals - home_goals
+        if (home_goals > away_goals) h2h[home_team_id].pts += 3
+        else if (away_goals > home_goals) h2h[away_team_id].pts += 3
+        else { h2h[home_team_id].pts += 1; h2h[away_team_id].pts += 1 }
+      }
+
+      tiedTeams.sort((a, b) => {
+        const ha = h2h[a.team_id], hb = h2h[b.team_id]
+        return hb.pts - ha.pts || hb.gd - ha.gd || hb.gf - ha.gf || b.gd - a.gd || b.gf - a.gf
+      })
+
+      for (let k = 0; k < tiedTeams.length; k++) teams[i + k] = tiedTeams[k]
+    }
+
+    i = j
+  }
+
+  return teams
 }
 
 // ─── USER PREDICTED STANDINGS ────────────────────────────────────────────────
