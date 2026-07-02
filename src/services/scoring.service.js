@@ -51,6 +51,7 @@ export async function scoreGroupMatch(matchId, db = pool) {
         await client.query(`
           INSERT INTO score_log (user_id, event_type, event_ref, stage, points)
           VALUES ($1, 'group_match', $2, 'group', $3)
+          ON CONFLICT (user_id, event_type, event_ref, stage) DO UPDATE SET points = EXCLUDED.points
         `, [pred.user_id, matchId, pts])
       }
     }
