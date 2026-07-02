@@ -6,6 +6,19 @@ export async function getMyQualifiers(req, res) {
   res.json(qualifiers)
 }
 
+export async function getMyKnockoutScore(req, res) {
+  const { rows } = await pool.query(`
+    SELECT stage, COALESCE(SUM(points), 0) AS points
+    FROM score_log
+    WHERE user_id = $1 AND event_type IN ('classification', 'champion')
+    GROUP BY stage
+  `, [req.user.sub])
+
+  const result = {}
+  for (const row of rows) result[row.stage] = Number(row.points)
+  res.json(result)
+}
+
 // Returns ALL knockout slots with the user's picks (null pred_winner_id if not picked)
 export async function getMyBracket(req, res) {
   const { rows } = await pool.query(`
